@@ -89,6 +89,13 @@ type MessageStore interface {
 	Conversations(context.Context) ([]Conversation, error)
 	Messages(context.Context, int64, MessageQuery) ([]Message, error)
 	MessagesAfter(context.Context, int64) ([]Message, error)
+	LatestMessageID(context.Context) (int64, error)
+}
+
+type ApplicationStatus struct {
+	State      string
+	Connection ConnectionKind
+	Label      string
 }
 type Contacts interface {
 	Resolve(context.Context, string) (Contact, error)

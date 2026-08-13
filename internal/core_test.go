@@ -32,8 +32,13 @@ func TestPoller(t *testing.T) {
 	b := mock.New()
 	p := app.Poller{Store: b}
 	m, e := p.Poll(context.Background())
-	if e != nil || len(m) != 4 || p.LastSeenID != 4 {
+	if e != nil || len(m) != 0 || p.LastSeenID != 4 {
 		t.Fatal(len(m), p.LastSeenID, e)
+	}
+	b.SimulateIncoming(1, "새 메시지")
+	m, _ = p.Poll(context.Background())
+	if len(m) != 1 || m[0].ID != 5 {
+		t.Fatalf("%+v", m)
 	}
 	m, _ = p.Poll(context.Background())
 	if len(m) != 0 {

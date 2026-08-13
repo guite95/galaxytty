@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/galaxytty/galaxytty/internal/app"
+	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/mock"
 	"github.com/galaxytty/galaxytty/internal/tui"
@@ -13,7 +15,7 @@ import (
 	"strings"
 )
 
-func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) error {
+func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) (err error) {
 	mockMode, jsonOut := false, false
 	clean := []string{}
 	for _, a := range args {
@@ -36,8 +38,24 @@ func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) er
 		return fmt.Errorf("real device adapters are not implemented; run with --mock")
 	}
 	b := mock.New()
+	n := &mock.Notifier{}
+	d := &mock.Display{}
+	lifecycle := app.NewLifecycle(d, n)
+	_ = lifecycle.Transition(app.Connecting)
+	_ = lifecycle.Transition(app.Ready)
+	cfg := config.Default()
+	service := app.NewService(b, b, n, lifecycle, app.NotificationPolicy{Enabled: cfg.Notifications.Enabled, ShowWhenFocused: cfg.Notifications.ShowWhenFocused}, domain.ApplicationStatus{Label: "Mock Connected"})
+	if err = service.InitializePolling(ctx); err != nil {
+		return err
+	}
+	defer func() {
+		shutdownErr := service.Shutdown(context.Background())
+		if err == nil {
+			err = shutdownErr
+		}
+	}()
 	if len(clean) == 0 {
-		return tui.Run(ctx, in, out, b, b)
+		return tui.Run(ctx, in, out, service, cfg.Polling.Interval.Duration)
 	}
 	cmd := clean[0]
 	print := func(v any) error {
@@ -58,18 +76,15 @@ func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) er
 	}
 	switch cmd {
 	case "conversations", "unread":
-		v, e := b.Conversations(ctx)
+		var v []domain.Conversation
+		var e error
+		if cmd == "unread" {
+			v, e = service.Unread(ctx)
+		} else {
+			v, e = service.Conversations(ctx)
+		}
 		if e != nil {
 			return e
-		}
-		if cmd == "unread" {
-			r := v[:0]
-			for _, c := range v {
-				if c.UnreadCount > 0 {
-					r = append(r, c)
-				}
-			}
-			v = r
 		}
 		return print(v)
 	case "messages":
@@ -80,7 +95,7 @@ func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) er
 		if e != nil {
 			return e
 		}
-		v, e := b.Messages(ctx, id, domain.MessageQuery{})
+		v, e := service.Messages(ctx, id, domain.MessageQuery{})
 		if e != nil {
 			return e
 		}
@@ -93,7 +108,7 @@ func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) er
 		if e := fs.Parse(clean[1:]); e != nil {
 			return e
 		}
-		return b.Send(ctx, *to, *text)
+		return service.SendToAddress(ctx, *to, *text)
 	case "doctor":
 		fmt.Fprintln(out, "GalaxyTTY Doctor\n\n✓ mock adapters          ready\n✓ SMS Provider fixture   accessible\n✓ Virtual Display fake   supported\n\nConnection:\n  Mock\n\nReady.")
 		return nil
