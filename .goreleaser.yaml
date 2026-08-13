@@ -1,0 +1,11 @@
+version: 2
+builds:
+  - id: msg
+    main: ./cmd/msg
+    binary: msg
+    goos: [darwin]
+    goarch: [amd64, arm64]
+archives:
+  - formats: [tar.gz]
+checksum:
+  name_template: checksums.txt
