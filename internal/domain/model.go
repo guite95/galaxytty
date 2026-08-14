@@ -92,8 +92,9 @@ type MessageQuery struct {
 	BeforeID int64
 }
 type SendResult struct {
-	MessageID int64 `json:"message_id"`
-	ThreadID  int64 `json:"thread_id"`
+	MessageID int64       `json:"message_id"`
+	ThreadID  int64       `json:"thread_id"`
+	Transport MessageType `json:"transport,omitempty"`
 }
 
 type Device interface {
@@ -105,6 +106,11 @@ type MessageStore interface {
 	Messages(context.Context, int64, MessageQuery) ([]Message, error)
 	MessagesAfter(context.Context, int64) ([]Message, error)
 	LatestMessageID(context.Context) (int64, error)
+}
+
+type MMSMessageStore interface {
+	LatestMMSMessageID(context.Context) (int64, error)
+	MMSMessagesAfter(context.Context, int64) ([]Message, error)
 }
 
 type ApplicationStatus struct {

@@ -15,6 +15,7 @@ type verificationStore struct {
 	err     error
 	block   bool
 	calls   int
+	latest  int64
 }
 
 func (s *verificationStore) Conversations(context.Context) ([]domain.Conversation, error) {
@@ -23,7 +24,7 @@ func (s *verificationStore) Conversations(context.Context) ([]domain.Conversatio
 func (s *verificationStore) Messages(context.Context, int64, domain.MessageQuery) ([]domain.Message, error) {
 	return nil, nil
 }
-func (s *verificationStore) LatestMessageID(context.Context) (int64, error) { return 0, nil }
+func (s *verificationStore) LatestMessageID(context.Context) (int64, error) { return s.latest, nil }
 func (s *verificationStore) MessagesAfter(ctx context.Context, _ int64) ([]domain.Message, error) {
 	s.calls++
 	if s.block {
@@ -38,6 +39,32 @@ func (s *verificationStore) MessagesAfter(ctx context.Context, _ int64) ([]domai
 	}
 	batch := s.batches[0]
 	s.batches = s.batches[1:]
+	return batch, nil
+}
+
+type mmsVerificationStore struct {
+	*verificationStore
+	latestMMS    int64
+	latestMMSErr error
+	mmsBatches   [][]domain.Message
+	mmsErr       error
+	mmsCalls     int
+}
+
+func (s *mmsVerificationStore) LatestMMSMessageID(context.Context) (int64, error) {
+	return s.latestMMS, s.latestMMSErr
+}
+
+func (s *mmsVerificationStore) MMSMessagesAfter(context.Context, int64) ([]domain.Message, error) {
+	s.mmsCalls++
+	if s.mmsErr != nil {
+		return nil, s.mmsErr
+	}
+	if len(s.mmsBatches) == 0 {
+		return nil, nil
+	}
+	batch := s.mmsBatches[0]
+	s.mmsBatches = s.mmsBatches[1:]
 	return batch, nil
 }
 
@@ -76,6 +103,47 @@ func TestVerifySentTimesOutWithoutLeakingRecipientOrBody(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), recipient) || strings.Contains(err.Error(), body) {
 		t.Fatalf("verification error leaked private values: %q", err)
+	}
+	if !strings.Contains(err.Error(), "layout coordinates") || !strings.Contains(err.Error(), "transport") {
+		t.Fatalf("verification timeout lacks actionable hint: %q", err)
+	}
+}
+
+func TestVerifySentAcceptsExactOutgoingTextMMSWithIndependentBaseline(t *testing.T) {
+	const recipient = "01012345678"
+	const body = "MMS text body"
+	store := &mmsVerificationStore{
+		verificationStore: &verificationStore{latest: 100, batches: [][]domain.Message{nil, nil}},
+		latestMMS:         40,
+		mmsBatches: [][]domain.Message{
+			{
+				{ID: 41, ThreadID: 7, Address: recipient, Body: "wrong", Direction: domain.DirectionOutgoing, Type: domain.MessageMMS},
+				{ID: 42, ThreadID: 7, Address: "01099999999", Body: body, Direction: domain.DirectionOutgoing, Type: domain.MessageMMS},
+			},
+			{{ID: 43, ThreadID: 7, Address: "+82 10-1234-5678", Body: body, Direction: domain.DirectionOutgoing, Type: domain.MessageMMS}},
+		},
+	}
+	baseline, err := captureSendBaseline(context.Background(), store)
+	if err != nil || baseline.SMSID != 100 || baseline.MMSID != 40 || !baseline.MMSAvailable {
+		t.Fatalf("baseline=%+v err=%v", baseline, err)
+	}
+	result, err := verifySentFromBaseline(context.Background(), store, baseline, recipient, body, 100*time.Millisecond, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MessageID != 43 || result.ThreadID != 7 || result.Transport != domain.MessageMMS || store.mmsCalls != 2 {
+		t.Fatalf("result=%+v mms calls=%d", result, store.mmsCalls)
+	}
+}
+
+func TestCaptureSendBaselineKeepsSMSAvailableWhenMMSProviderIsUnsupported(t *testing.T) {
+	store := &mmsVerificationStore{
+		verificationStore: &verificationStore{latest: 100},
+		latestMMSErr:      domain.ErrProviderPermissionDenied,
+	}
+	baseline, err := captureSendBaseline(context.Background(), store)
+	if err != nil || baseline.SMSID != 100 || baseline.MMSAvailable {
+		t.Fatalf("baseline=%+v err=%v", baseline, err)
 	}
 }
 

@@ -160,14 +160,14 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 }
 
 func (s *Sender) tapAndVerify(ctx context.Context, display domain.VirtualDisplay, phone, text string) (domain.SendResult, error) {
-	baseline, err := s.store.LatestMessageID(ctx)
+	baseline, err := captureSendBaseline(ctx, s.store)
 	if err != nil {
 		return domain.SendResult{}, s.maybeDisconnectError(err)
 	}
 	if err := s.controller.TapSend(ctx, display); err != nil {
 		return domain.SendResult{}, s.controllerError(err)
 	}
-	result, err := verifySent(ctx, s.store, baseline, phone, text, s.config.VerificationTimeout, s.config.VerificationInterval)
+	result, err := verifySentFromBaseline(ctx, s.store, baseline, phone, text, s.config.VerificationTimeout, s.config.VerificationInterval)
 	if err != nil {
 		return domain.SendResult{}, s.maybeDisconnectError(err)
 	}
