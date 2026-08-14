@@ -97,6 +97,9 @@ type ApplicationStatus struct {
 	Connection ConnectionKind
 	Label      string
 }
+type StatusProvider interface {
+	Status(context.Context) ApplicationStatus
+}
 type Contacts interface {
 	Resolve(context.Context, string) (Contact, error)
 }

@@ -30,18 +30,23 @@ type API interface {
 type NotificationPolicy struct{ Enabled, ShowWhenFocused bool }
 
 type Service struct {
-	store     domain.MessageStore
-	sender    domain.MessageSender
-	notifier  domain.Notifier
-	lifecycle *Lifecycle
-	poller    *Poller
-	policy    NotificationPolicy
-	status    domain.ApplicationStatus
-	mu        sync.Mutex
+	store          domain.MessageStore
+	sender         domain.MessageSender
+	notifier       domain.Notifier
+	lifecycle      *Lifecycle
+	poller         *Poller
+	policy         NotificationPolicy
+	status         domain.ApplicationStatus
+	statusProvider domain.StatusProvider
+	mu             sync.Mutex
 }
 
 func NewService(store domain.MessageStore, sender domain.MessageSender, notifier domain.Notifier, lifecycle *Lifecycle, policy NotificationPolicy, status domain.ApplicationStatus) *Service {
 	return &Service{store: store, sender: sender, notifier: notifier, lifecycle: lifecycle, poller: &Poller{Store: store}, policy: policy, status: status}
+}
+func (s *Service) WithStatusProvider(provider domain.StatusProvider) *Service {
+	s.statusProvider = provider
+	return s
 }
 func (s *Service) Conversations(ctx context.Context) ([]domain.Conversation, error) {
 	return s.store.Conversations(ctx)
@@ -107,7 +112,10 @@ func (s *Service) Poll(ctx context.Context, focused int64) ([]domain.Message, er
 func (s *Service) shouldNotify(m domain.Message, focused int64) bool {
 	return s.policy.Enabled && m.Direction == domain.DirectionIncoming && (s.policy.ShowWhenFocused || m.ThreadID != focused)
 }
-func (s *Service) Status(context.Context) domain.ApplicationStatus {
+func (s *Service) Status(ctx context.Context) domain.ApplicationStatus {
+	if s.statusProvider != nil {
+		return s.statusProvider.Status(ctx)
+	}
 	state := Ready
 	if s.lifecycle != nil {
 		state = s.lifecycle.State()
