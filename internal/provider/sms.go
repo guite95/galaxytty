@@ -35,6 +35,7 @@ func (s *Store) Messages(ctx context.Context, threadID int64, messageQuery domai
 		limit = maximumMessageLimit
 	}
 	where := fmt.Sprintf("thread_id = %d", threadID)
+	where += " AND type IN (1,2)"
 	if messageQuery.BeforeID > 0 {
 		where += fmt.Sprintf(" AND _id < %d", messageQuery.BeforeID)
 	}
@@ -62,6 +63,7 @@ func (s *Store) LatestMessageID(ctx context.Context) (int64, error) {
 	rows, err := s.query(ctx, Query{
 		URI:        "content://sms",
 		Projection: []string{"_id"},
+		Where:      "type IN (1,2)",
 		Sort:       "_id DESC LIMIT 1",
 	})
 	if err != nil {
@@ -80,7 +82,7 @@ func (s *Store) MessagesAfter(ctx context.Context, lastID int64) ([]domain.Messa
 	rows, err := s.query(ctx, Query{
 		URI:          "content://sms",
 		Projection:   smsProjection,
-		Where:        fmt.Sprintf("_id > %d", lastID),
+		Where:        fmt.Sprintf("_id > %d AND type IN (1,2)", lastID),
 		Sort:         fmt.Sprintf("_id ASC LIMIT %d", pollMessageLimit),
 		FreeFormLast: "body",
 	})
@@ -93,6 +95,13 @@ func (s *Store) MessagesAfter(ctx context.Context, lastID int64) ([]domain.Messa
 func mapSMSRows(rows []map[string]string) ([]domain.Message, error) {
 	messages := make([]domain.Message, 0, len(rows))
 	for _, row := range rows {
+		rawType, err := parseIntField(row, "type")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := DirectionFromAndroid(rawType); err != nil {
+			continue
+		}
 		message, err := mapSMSRow(row)
 		if err != nil {
 			return nil, err

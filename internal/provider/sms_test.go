@@ -31,7 +31,7 @@ func TestMessagesBuildsBoundedHistoryQueryAndReturnsOldestFirst(t *testing.T) {
 	if !messages[1].Timestamp.Equal(time.UnixMilli(1700000000000)) {
 		t.Fatalf("timestamp=%v", messages[1].Timestamp)
 	}
-	if got := queryArg(shell.args, "--where"); got != "\"thread_id = 2 AND _id < 9\"" {
+	if got := queryArg(shell.args, "--where"); got != "\"thread_id = 2 AND type IN (1,2) AND _id < 9\"" {
 		t.Fatalf("where=%q", got)
 	}
 	if got := queryArg(shell.args, "--sort"); got != "\"_id DESC LIMIT 200\"" {
@@ -60,6 +60,9 @@ func TestLatestMessageIDUsesSingleRowQuery(t *testing.T) {
 	if got := queryArg(shell.args, "--sort"); got != "\"_id DESC LIMIT 1\"" {
 		t.Fatalf("sort=%q", got)
 	}
+	if got := queryArg(shell.args, "--where"); got != "\"type IN (1,2)\"" {
+		t.Fatalf("where=%q", got)
+	}
 }
 
 func TestLatestMessageIDReturnsZeroForNoRows(t *testing.T) {
@@ -82,7 +85,7 @@ func TestMessagesAfterUsesAscendingIncrementalQuery(t *testing.T) {
 	if len(messages) != 2 || messages[0].ID != 7 || messages[1].ID != 8 {
 		t.Fatalf("messages=%+v", messages)
 	}
-	if got := queryArg(shell.args, "--where"); got != "\"_id > 6\"" {
+	if got := queryArg(shell.args, "--where"); got != "\"_id > 6 AND type IN (1,2)\"" {
 		t.Fatalf("where=%q", got)
 	}
 	if got := queryArg(shell.args, "--sort"); got != "\"_id ASC LIMIT 500\"" {
@@ -90,13 +93,31 @@ func TestMessagesAfterUsesAscendingIncrementalQuery(t *testing.T) {
 	}
 }
 
-func TestSMSMappingRejectsMalformedFields(t *testing.T) {
+func TestSMSMappingSkipsKnownNonHistoryAndUnknownTypes(t *testing.T) {
+	rows := []map[string]string{
+		smsRow("10", "1", "0"),
+		smsRow("bad-draft-id", "3", "bad-read"),
+		smsRow("bad-outbox-id", "4", "bad-read"),
+		smsRow("bad-failed-id", "5", "bad-read"),
+		smsRow("bad-queued-id", "6", "bad-read"),
+		smsRow("bad-unknown-id", "99", "bad-read"),
+		smsRow("16", "2", "1"),
+	}
+	messages, err := mapSMSRows(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != 10 || messages[0].Direction != domain.DirectionIncoming || messages[1].ID != 16 || messages[1].Direction != domain.DirectionOutgoing {
+		t.Fatalf("messages=%+v", messages)
+	}
+}
+
+func TestSMSMappingRejectsMalformedSupportedFields(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		row  map[string]string
 	}{
 		{name: "id", row: smsRow("bad", "1", "1")},
-		{name: "type", row: smsRow("1", "9", "1")},
 		{name: "read", row: smsRow("1", "1", "2")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
