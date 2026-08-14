@@ -112,9 +112,10 @@ type MessageSender interface {
 	Send(context.Context, string, string) error
 }
 type ConversationController interface {
-	OpenConversation(context.Context, string) error
+	OpenConversation(context.Context, VirtualDisplay, string) error
 }
 type Clipboard interface {
+	Read(context.Context) (string, error)
 	Set(context.Context, string) error
 }
 type Notifier interface {
