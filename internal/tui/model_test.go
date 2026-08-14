@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"errors"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/mock"
+	"github.com/galaxytty/galaxytty/internal/readonly"
 	"strings"
 	"testing"
 	"time"
@@ -106,4 +108,48 @@ func TestAsyncIncomingRefresh(t *testing.T) {
 		t.Fatal("expected refresh")
 	}
 	_ = u
+}
+
+type mutableStatus struct{ value domain.ApplicationStatus }
+
+func (s *mutableStatus) Status(context.Context) domain.ApplicationStatus { return s.value }
+
+func readOnlyFixture(t *testing.T) (Model, *mutableStatus) {
+	t.Helper()
+	backend := mock.New()
+	status := &mutableStatus{value: domain.ApplicationStatus{State: "connected", Connection: domain.ConnectionUSB, Label: "USB"}}
+	lifecycle := app.NewLifecycle(nil, readonly.Notifier{})
+	_ = lifecycle.Transition(app.Connecting)
+	_ = lifecycle.Transition(app.Ready)
+	service := app.NewService(backend, readonly.Sender{}, readonly.Notifier{}, lifecycle, app.NotificationPolicy{}, status.value).WithStatusProvider(status)
+	if err := service.InitializePolling(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	model := NewModel(context.Background(), service, time.Hour)
+	updated, _ := model.Update(conversationsMsg{items: backend.ConversationsData})
+	return updated.(Model), status
+}
+
+func TestProviderErrorRefreshesOfflineStatus(t *testing.T) {
+	model, status := readOnlyFixture(t)
+	status.value = domain.ApplicationStatus{State: "disconnected", Connection: domain.ConnectionUSB, Label: "Offline"}
+	updated, _ := model.Update(messagesMsg{err: errors.New("synthetic provider error")})
+	if got := updated.(Model).status; got != "Offline" {
+		t.Fatalf("status=%q", got)
+	}
+}
+
+func TestReadOnlySendKeepsComposerAndShowsUnavailable(t *testing.T) {
+	model, _ := readOnlyFixture(t)
+	model = open(t, model)
+	model = typeText(model, "synthetic hello")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("missing send command")
+	}
+	updated, _ = updated.(Model).Update(cmd())
+	got := updated.(Model)
+	if got.composer.Value() != "synthetic hello" || got.errorText != "Sending is not available yet." {
+		t.Fatalf("composer=%q error=%q", got.composer.Value(), got.errorText)
+	}
 }

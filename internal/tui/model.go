@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -94,12 +95,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messagesMsg:
 		m.messages = x.items
 		m.setError(x.err)
+		m.refreshStatus()
 		if x.err == nil {
 			m.screen = chatScreen
 			m.composer.Focus()
 		}
 	case sentMsg:
 		m.setError(x.err)
+		m.refreshStatus()
 		if x.err == nil {
 			m.composer.SetValue("")
 			return m, m.loadMessages(m.selectedID())
@@ -108,6 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.poll(), m.tick())
 	case pollMsg:
 		m.setError(x.err)
+		m.refreshStatus()
 		if len(x.items) > 0 {
 			if m.screen == chatScreen {
 				return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))
@@ -197,7 +201,17 @@ func (m Model) selectedID() int64 {
 }
 func (m *Model) setError(e error) {
 	if e != nil {
+		if errors.Is(e, domain.ErrSendingNotImplemented) {
+			m.errorText = "Sending is not available yet."
+			return
+		}
 		m.errorText = e.Error()
+	}
+}
+
+func (m *Model) refreshStatus() {
+	if status := m.service.Status(m.ctx); status.Label != "" {
+		m.status = status.Label
 	}
 }
 
