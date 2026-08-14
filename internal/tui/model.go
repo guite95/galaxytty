@@ -30,7 +30,10 @@ type messagesMsg struct {
 	items []domain.Message
 	err   error
 }
-type sentMsg struct{ err error }
+type sentMsg struct {
+	result domain.SendResult
+	err    error
+}
 type pollMsg struct {
 	items []domain.Message
 	err   error
@@ -49,6 +52,7 @@ type Model struct {
 	width, height     int
 	status, errorText string
 	pollInterval      time.Duration
+	sending           bool
 }
 
 func NewModel(ctx context.Context, service app.API, interval time.Duration) Model {
@@ -91,7 +95,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case conversationsMsg:
 		m.replaceConversations(x.items)
 		m.setError(x.err)
-		m.status = m.service.Status(m.ctx).Label
+		m.refreshStatus()
 	case messagesMsg:
 		m.messages = x.items
 		m.setError(x.err)
@@ -101,11 +105,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.composer.Focus()
 		}
 	case sentMsg:
+		m.sending = false
 		m.setError(x.err)
 		m.refreshStatus()
 		if x.err == nil {
 			m.composer.SetValue("")
-			return m, m.loadMessages(m.selectedID())
+			m.errorText = ""
+			return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))
 		}
 	case tickMsg:
 		return m, tea.Batch(m.poll(), m.tick())
@@ -124,6 +130,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if x.Type == tea.KeyCtrlC {
 			return m, m.shutdown()
+		}
+		if m.sending {
+			return m, nil
 		}
 		if x.Type == tea.KeyEsc && m.screen == chatScreen {
 			m.screen = conversationsScreen
@@ -191,9 +200,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		}
 	}
 	id := m.selectedID()
+	m.sending = true
+	m.status = "Sending…"
+	m.errorText = ""
 	return m, func() tea.Msg {
-		_, err := m.service.SendToConversation(m.ctx, id, value)
-		return sentMsg{err}
+		result, err := m.service.SendToConversation(m.ctx, id, value)
+		return sentMsg{result: result, err: err}
 	}
 }
 func (m Model) selectedID() int64 {
@@ -231,11 +243,18 @@ func (m *Model) setError(e error) {
 			m.errorText = "Sending is not available yet."
 			return
 		}
+		if errors.Is(e, app.ErrGroupSendUnsupported) {
+			m.errorText = "Group conversation sending is not supported yet."
+			return
+		}
 		m.errorText = e.Error()
 	}
 }
 
 func (m *Model) refreshStatus() {
+	if m.sending {
+		return
+	}
 	if status := m.service.Status(m.ctx); status.Label != "" {
 		m.status = status.Label
 	}
