@@ -20,6 +20,7 @@ type fakeADB struct {
 	packageInstalled  bool
 	defaultSMSHandler string
 	providerOutput    map[string][]byte
+	projectionOutput  map[string][]byte
 	contentCalls      [][]string
 	shellCalls        [][]string
 	mdnsErr           error
@@ -36,6 +37,7 @@ func readyADB(connection domain.ConnectionKind) *fakeADB {
 		packageInstalled:  true,
 		defaultSMSHandler: "com.samsung.android.messaging",
 		providerOutput:    map[string][]byte{},
+		projectionOutput:  map[string][]byte{},
 	}
 }
 
@@ -79,6 +81,10 @@ func (f *fakeADB) Shell(_ context.Context, target string, args ...string) ([]byt
 	if len(args) > 0 && args[0] == "content" {
 		f.contentCalls = append(f.contentCalls, append([]string(nil), args...))
 		uri := argAfter(args, "--uri")
+		projection := argAfter(args, "--projection")
+		if output, ok := f.projectionOutput[uri+"|"+projection]; ok {
+			return output, nil
+		}
 		if output, ok := f.providerOutput[uri]; ok {
 			return output, nil
 		}
@@ -137,6 +143,24 @@ func TestDoctorOptionalProviderFailureDoesNotBlockReadiness(t *testing.T) {
 	report := (Service{ADB: backend}).Run(context.Background(), config.Default(), "")
 	if !report.Ready || findCheck(report, "MMS Provider").State != Info {
 		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestDoctorReportsRCSStandardExtensionVisibilityPerColumn(t *testing.T) {
+	backend := readyADB(domain.ConnectionUSB)
+	backend.projectionOutput["content://sms|_id:chat_type"] = []byte("[ERROR] no such column: chat_type\n")
+	report := (Service{ADB: backend}).Run(context.Background(), config.Default(), "")
+	if !report.ReadReady || !report.SendReady {
+		t.Fatalf("report=%+v", report)
+	}
+	check := findCheck(report, "RCS standard extension visibility")
+	for _, want := range []string{"teleservice_id", "app_id", "correlation_tag", "chat_type unavailable", "mapping unsupported"} {
+		if !strings.Contains(check.Detail, want) {
+			t.Fatalf("RCS check missing %q: %+v", want, check)
+		}
+	}
+	if check.State != Info {
+		t.Fatalf("RCS check=%+v", check)
 	}
 }
 

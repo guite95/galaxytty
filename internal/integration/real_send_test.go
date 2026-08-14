@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,153 @@ func TestRealSamsungSend(t *testing.T) {
 	shutdown = true
 	assertNoNewRecordings(t, beforeRecords)
 	assertMainDisplayStatePreserved(t, beforeState, readMainDisplayState(ctx, target))
+}
+
+func TestRealSamsungRCSSend(t *testing.T) {
+	if os.Getenv("GALAXYTTY_ENABLE_RCS_SEND_TEST") != "1" || strings.TrimSpace(os.Getenv("GALAXYTTY_RCS_TEST_RECIPIENT")) == "" {
+		t.Skip("explicit real RCS send test opt-in and recipient required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cfg := config.Default()
+	recipient := strings.TrimSpace(os.Getenv("GALAXYTTY_RCS_TEST_RECIPIENT"))
+	body := "GalaxyTTY RCS integration test " + time.Now().UTC().Format(time.RFC3339)
+	target := discoverTarget(t, ctx, cfg)
+	store := provider.NewStore(target)
+	baseline, err := store.LatestMessageID(ctx)
+	if err != nil {
+		t.Fatal("could not establish RCS observation baseline")
+	}
+	beforeExtensions := observeSMSExtensions(ctx, target, baseline)
+	beforeState := readMainDisplayState(ctx, target)
+	beforeRecords := recordingSnapshot(t)
+
+	runtime, err := bootstrap.Real(ctx, cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdown := false
+	defer func() {
+		if !shutdown {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stopCancel()
+			_ = runtime.Service.Shutdown(stopCtx)
+		}
+	}()
+	result, err := runtime.Service.SendToAddress(ctx, recipient, body)
+	if err != nil {
+		t.Fatalf("RCS send was not machine verified; no retry was attempted: %v", err)
+	}
+	afterExtensions := observeSMSExtensions(ctx, target, result.MessageID)
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err = runtime.Service.Shutdown(stopCtx)
+	stopCancel()
+	if err != nil {
+		t.Fatal("RCS observation runtime shutdown failed")
+	}
+	shutdown = true
+	assertNoNewRecordings(t, beforeRecords)
+	assertMainDisplayStatePreserved(t, beforeState, readMainDisplayState(ctx, target))
+
+	if result.Transport == domain.MessageRCS {
+		return
+	}
+	_ = beforeExtensions
+	_ = afterExtensions
+	t.Skip("exact outgoing provider evidence exists, but accessible extension columns do not reliably classify RCS transport")
+}
+
+func TestRealSamsungMMSTextSend(t *testing.T) {
+	if os.Getenv("GALAXYTTY_ENABLE_MMS_SEND_TEST") != "1" || strings.TrimSpace(os.Getenv("GALAXYTTY_MMS_TEST_RECIPIENT")) == "" {
+		t.Skip("explicit real MMS text send test opt-in and recipient required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cfg := config.Default()
+	recipient := strings.TrimSpace(os.Getenv("GALAXYTTY_MMS_TEST_RECIPIENT"))
+	prefix := "GalaxyTTY MMS integration test " + time.Now().UTC().Format(time.RFC3339) + " "
+	body := prefix + strings.Repeat("MMS text verification 한글 😀 ", 48)
+	target := discoverTarget(t, ctx, cfg)
+	store := provider.NewStore(target)
+	baseline, err := store.LatestMMSMessageID(ctx)
+	if err != nil {
+		t.Fatal("could not establish MMS provider baseline")
+	}
+	beforeState := readMainDisplayState(ctx, target)
+	beforeRecords := recordingSnapshot(t)
+
+	runtime, err := bootstrap.Real(ctx, cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdown := false
+	defer func() {
+		if !shutdown {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stopCancel()
+			_ = runtime.Service.Shutdown(stopCtx)
+		}
+	}()
+	result, err := runtime.Service.SendToAddress(ctx, recipient, body)
+	if err != nil {
+		t.Fatalf("MMS text send was not machine verified; no retry was attempted: %v", err)
+	}
+	if result.Transport != domain.MessageMMS || result.MessageID <= baseline {
+		t.Fatal("Samsung Messages did not expose exact outgoing MMS text evidence")
+	}
+	messages, err := store.MMSMessagesAfter(ctx, baseline)
+	if err != nil {
+		t.Fatal("MMS provider post-send verification query failed")
+	}
+	found := false
+	for _, message := range messages {
+		if message.ID == result.MessageID && message.ThreadID == result.ThreadID && message.Direction == domain.DirectionOutgoing && message.Type == domain.MessageMMS && domain.NormalizePhone(message.Address) == domain.NormalizePhone(recipient) && message.Body == body {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("verified outgoing MMS provider evidence was not found after send")
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err = runtime.Service.Shutdown(stopCtx)
+	stopCancel()
+	if err != nil {
+		t.Fatal("MMS send runtime shutdown failed")
+	}
+	shutdown = true
+	assertNoNewRecordings(t, beforeRecords)
+	assertMainDisplayStatePreserved(t, beforeState, readMainDisplayState(ctx, target))
+}
+
+type smsExtensionSnapshot struct {
+	supported map[string]bool
+	nonEmpty  map[string]bool
+}
+
+func observeSMSExtensions(ctx context.Context, target *adb.Target, messageID int64) smsExtensionSnapshot {
+	snapshot := smsExtensionSnapshot{supported: map[string]bool{}, nonEmpty: map[string]bool{}}
+	if messageID <= 0 {
+		return snapshot
+	}
+	for _, field := range []string{"teleservice_id", "app_id", "chat_type", "correlation_tag"} {
+		output, err := target.Shell(ctx,
+			"content", "query", "--uri", "content://sms",
+			"--projection", "_id:"+field,
+			"--where", `"_id = `+strconv.FormatInt(messageID, 10)+`"`,
+		)
+		if err != nil {
+			continue
+		}
+		rows, err := provider.ParseContentRows(string(output), []string{"_id", field})
+		if err != nil || len(rows) != 1 {
+			continue
+		}
+		snapshot.supported[field] = true
+		value := strings.TrimSpace(rows[0][field])
+		snapshot.nonEmpty[field] = value != "" && !strings.EqualFold(value, "null")
+	}
+	return snapshot
 }
 
 func discoverTarget(t *testing.T, ctx context.Context, cfg config.Config) *adb.Target {

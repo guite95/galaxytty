@@ -104,7 +104,6 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 	}{
 		{name: "MMS Provider", uri: "content://mms", projection: []string{"_id"}, detail: "accessible"},
 		{name: "MMS Parts", uri: "content://mms/part", projection: []string{"_id"}, detail: "accessible"},
-		{name: "RCS", uri: "content://sms", projection: []string{"_id", "teleservice_id", "app_id", "chat_type", "correlation_tag"}, detail: "standard extension columns accessible; mapping deferred"},
 	} {
 		if _, err := store.Probe(ctx, check.uri, check.projection); err != nil {
 			report.Checks = append(report.Checks, Check{Name: check.name, Detail: "unavailable or unsupported", State: Info})
@@ -112,6 +111,19 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 			report.Checks = append(report.Checks, Check{Name: check.name, Detail: check.detail, State: Info})
 		}
 	}
+	rcsDetails := make([]string, 0, 4)
+	for _, field := range []string{"teleservice_id", "app_id", "chat_type", "correlation_tag"} {
+		if _, err := store.Probe(ctx, "content://sms", []string{"_id", field}); err != nil {
+			rcsDetails = append(rcsDetails, field+" unavailable")
+		} else {
+			rcsDetails = append(rcsDetails, field+" accessible")
+		}
+	}
+	report.Checks = append(report.Checks, Check{
+		Name:   "RCS standard extension visibility",
+		Detail: strings.Join(rcsDetails, ", ") + "; mapping unsupported",
+		State:  Info,
+	})
 
 	s.finish(ctx, cfg, &report, requiredReady, defaultHandlerReady)
 	return report
