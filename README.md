@@ -14,16 +14,19 @@ Android application and does not call modem SMS APIs directly.
 
 ## Prerequisites
 
-- macOS (`pbcopy`, `pbpaste`, and `osascript` enable the clipboard compatibility path)
+- macOS (`pbcopy`, `pbpaste`, and `osascript` are required only for the optional
+  clipboard compatibility mode)
 - adb from Android platform-tools
 - scrcpy 4.1 or newer for real sending
 - One authorized Samsung Galaxy connected through USB debugging, or an
   already-connected Wireless Debugging target
 - Samsung Messages (`com.samsung.android.messaging`)
+- Samsung Messages selected as the default SMS role holder for sending
 
-GalaxyTTY never runs `adb pair`, targets the main display with a wake command,
-unlocks it, enters a PIN, changes the default SMS app, grants SMS permissions,
-or installs an APK. Pair or authorize the device yourself before starting it.
+GalaxyTTY never runs `adb pair`, wakes or unlocks the main display, enters a
+PIN, changes the default SMS app, grants SMS permissions, or installs an APK.
+Pair or authorize the device and choose Samsung Messages as the default handler
+yourself before starting it.
 
 ## Real mode
 
@@ -58,20 +61,24 @@ go run ./cmd/msg send --to 01012345678 --text '안녕하세요 😀'
 go run ./cmd/msg send --to 01012345678 --text '안녕하세요 😀' --json
 ```
 
-JSON success contains only the verified provider IDs:
+SMS JSON success contains the verified provider IDs:
 
 ```json
 {"success":true,"message_id":12345,"thread_id":49}
 ```
 
 The first real send lazily starts one reusable 1080x1920 scrcpy virtual
-display. Samsung Messages is opened there with a display-targeted `SENDTO`
-intent. On the reference Android 16 / One UI 8.5 device, Samsung Messages could
-not read the clipboard set by scrcpy from its virtual display, so the active
-compatibility path supplies Korean, other Unicode text, and emoji through
-Android's standard `sms_body` intent extra. It never uses `adb shell input
-text`. The intent argument is remote-shell quoted and controller errors redact
-the recipient and body.
+display. The default `intent_body` mode runs without video playback or a host
+window. Samsung Messages is opened with a package-targeted, display-targeted
+`SENDTO` intent, so another installed handler cannot receive the send. The
+sender rechecks the public Android SMS role immediately before starting the
+display.
+
+Korean, other Unicode text, and emoji are supplied through Android's standard
+`sms_body` intent extra. GalaxyTTY never uses `adb shell input text`. The remote
+command is single-quote escaped, rejects NUL, and is sent to `adb shell` through
+stdin so the recipient and body are not placed in the host process argument
+list. Normal logs and errors redact both values.
 
 The macOS `pbcopy`/`pbpaste` adapter, scrcpy clipboard synchronization, host
 clipboard restoration, and display-specific `KEYCODE_PASTE` path remain
@@ -79,18 +86,30 @@ implemented and unit-tested for devices where the virtual-display clipboard is
 available. The scrcpy bridge uses its documented public shortcut in a tiny
 dedicated window and never opens the private control protocol.
 
-Tapping Send is not considered success. GalaxyTTY records the latest SMS
-Provider ID immediately before the tap and waits for a newer row whose
-direction is outgoing and whose normalized recipient and body both match
-exactly. Samsung Messages decides whether the conversation uses SMS, MMS, or
-RCS; GalaxyTTY does not force a transport.
+Tapping Send is not considered success. GalaxyTTY records independent SMS and
+MMS Provider baselines immediately before the tap and waits for newer exact
+outgoing evidence: normalized recipient and body must both match. Incoming
+self-echoes, rows before the baseline, and unrelated rows do not count.
+Samsung Messages decides whether the conversation uses SMS, text MMS, or RCS;
+GalaxyTTY does not force a transport and does not retry after an ambiguous
+timeout.
 
-The main display remains locked and GalaxyTTY never enters a PIN. All message
-UI input is sent to the runtime Android logical display ID parsed from scrcpy
-output. On Samsung firmware that puts the virtual display in the main display's
-power group, a display-specific wake event may also activate logical display 0
-during the send; GalaxyTTY records the original state and restores display 0 to
-sleep after both success and failure.
+The production send path does not use scrcpy `--keep-active`, inject a wake key,
+or run a cleanup sleep command. All message UI input is sent only to the
+runtime Android logical display ID parsed from scrcpy output. GalaxyTTY never
+enters a PIN or intentionally unlocks the main display.
+
+### Transport verification
+
+| Transport | Send path | Machine verification | Evidence and limitation |
+| --- | --- | --- | --- |
+| SMS | Samsung Messages | Exact | New `content://sms` sent row with exact recipient and body |
+| Text MMS | Samsung Messages | Exact when exposed | New sent `content://mms` send-request plus one exact `text/plain` part and one exact `TO` address |
+| RCS / Chat+ | Samsung Messages | Transport classification unsupported | Accessible Samsung SMS extension columns do not provide a reliable SMS-versus-RCS discriminator on the reference device; GalaxyTTY does not label an unclassified success as RCS |
+
+`transport` is emitted only when the verifier can classify it. For example, a
+verified text MMS result includes `"transport":"mms"`; an exact row without a
+reliable transport discriminator leaves the field absent.
 
 Group conversations and image/attachment sending are not supported. A group
 send attempt fails before starting the virtual display.
@@ -106,14 +125,20 @@ text for a deliberate retry.
 | Key | Action |
 | --- | --- |
 | Enter | Open the selected conversation or submit the composer |
+| Up / Down | Move through conversations |
+| PageUp / PageDown | Scroll toward older / newer chat history |
+| End | Return to the latest message |
 | Esc | Return from chat to the conversation list |
 | `/help` | Show keyboard help |
 | `/exit`, `/quit` | Gracefully shut down and stop scrcpy |
 | Ctrl+C | Gracefully shut down and stop scrcpy |
 
-The `q` key remains ordinary composer input, not a quit shortcut. The virtual
-display is reused for the GalaxyTTY process lifetime and is stopped on normal
-shutdown; its temporary recording is deleted.
+The `j`, `k`, and `q` keys remain ordinary composer input, not navigation or
+quit shortcuts. PageUp lazily fetches older pages when the viewport reaches the
+oldest loaded message. New polling results follow the bottom only while the
+user is already at the bottom; they do not displace an older viewport. The
+virtual display is reused for the GalaxyTTY process lifetime and is stopped on
+normal shutdown; its temporary recording is deleted.
 
 ## Doctor
 
@@ -127,10 +152,13 @@ Read: ready
 Send: ready
 ```
 
-Send readiness checks scrcpy and the configured Samsung layout in addition to
-the selected Galaxy, Samsung Messages, and SMS Provider. Clipboard compatibility
-is reported separately; missing clipboard commands do not block the active
-intent-body send path or the existing read path.
+Send readiness checks the default Samsung SMS role, scrcpy, the configured text
+input mode, and the Samsung layout in addition to the selected Galaxy, Samsung
+Messages, and SMS Provider. Clipboard compatibility is reported separately;
+missing clipboard commands do not block `intent_body` mode or the read path,
+but do block explicitly selected `clipboard` mode. Doctor also reports MMS
+provider access and the visibility (not inferred meaning) of candidate RCS
+extension columns.
 
 ## Mock mode
 
@@ -166,6 +194,7 @@ enabled = true
 show_when_focused = false
 
 [samsung]
+text_input_mode = "intent_body"
 display_width = 1080
 display_height = 1920
 clipboard_sync_delay = "300ms"
@@ -180,9 +209,10 @@ send_y = 955
 ```
 
 Omit `connection.device` for automatic selection. A CLI device flag overrides
-the file. Missing files use defaults; malformed files, unknown fields,
-non-positive timings, invalid dimensions, and out-of-bounds coordinates return
-an error before runtime construction.
+the file. `text_input_mode` accepts only `intent_body` (the default) or
+`clipboard`. Missing files use defaults; malformed files, unknown fields,
+unsupported modes, non-positive timings, invalid dimensions, and out-of-bounds
+coordinates return an error before runtime construction.
 
 ## Architecture
 
@@ -195,9 +225,9 @@ MessageSender + MessageStore ports
     |
 Samsung sender
     |-- scrcpy virtual-display manager
-    |-- selected ADB target / Samsung controller / sms_body compatibility
+    |-- selected ADB target / package-targeted Samsung controller / sms_body
     |-- macOS clipboard adapter (supported compatibility path)
-    `-- SMS Provider verification
+    `-- exact SMS and text-MMS Provider verification
 ```
 
 - `internal/app` owns conversation targeting, group rejection, polling,
@@ -205,7 +235,7 @@ Samsung sender
 - `internal/adb` owns direct ADB subprocess execution, output parsing,
   USB/Wireless classification, and device selection.
 - `internal/provider` owns read-only Content Provider query construction and
-  SMS/conversation/contact mapping.
+  SMS/conversation/contact mapping plus outgoing text-MMS evidence mapping.
 - `internal/scrcpy` owns the lazy subprocess, runtime logical display ID,
   health, termination, reaping, and recording cleanup.
 - `internal/samsung` owns the fixed layout profile, display-specific public ADB
@@ -256,20 +286,41 @@ The actual-send test generates a clearly labeled timestamp body, accepts only
 the exact outgoing provider row, ignores an incoming self-message echo, and
 does not print the body or recipient.
 
+RCS / Chat+ and text-MMS observations have separate opt-ins and never reuse the
+SMS recipient automatically:
+
+```sh
+GALAXYTTY_ENABLE_RCS_SEND_TEST=1 \
+GALAXYTTY_RCS_TEST_RECIPIENT='explicit-known-chat-plus-recipient' \
+go test -tags=integration ./internal/integration -run TestRealSamsungRCSSend -count=1 -v
+
+GALAXYTTY_ENABLE_MMS_SEND_TEST=1 \
+GALAXYTTY_MMS_TEST_RECIPIENT='explicit-mms-test-recipient' \
+go test -tags=integration ./internal/integration -run TestRealSamsungMMSTextSend -count=1 -v
+```
+
+Each test sends at most once. The RCS test cannot PASS unless accessible
+evidence reliably classifies RCS; otherwise it reports the transport as
+unsupported after the one explicitly authorized observation. The MMS test
+requires exact outgoing MMS message, text-part, and recipient evidence.
+
 ## Known limitations
 
 - Samsung Messages composer/send coordinates are device- and app-layout
   dependent. Adjust the Samsung layout configuration after an app update if
   needed.
-- Clipboard synchronization is asynchronous; only the focused sync and settle
-  delays are configurable. The reference Android 16 device uses the standard
-  `sms_body` compatibility path because its virtual display cannot consume the
-  scrcpy-populated global clipboard.
+- Clipboard synchronization is asynchronous and device-dependent. It is an
+  explicit compatibility mode; the reference configuration uses `intent_body`.
 - Only one-to-one text sends are supported. Group sending and images or other
   attachments are deferred.
+- RCS transport classification is unsupported on the reference device with the
+  currently accessible provider fields. Exact unclassified outgoing evidence
+  is not advertised as verified RCS.
+- Text-MMS provider verification is implemented, but a carrier-billable live
+  MMS send is run only under its explicit integration gate.
 - A dead scrcpy process is restarted on the next send, but advanced reconnect
   and automatic USB-to-Wireless failover are deferred.
-- MMS/RCS attachment polish, native notifications, image viewing, history
-  scrolling polish, and Homebrew release packaging are deferred.
+- Full MMS/RCS history, attachment handling, native notifications, image
+  viewing, and Homebrew release packaging are deferred.
 
 Licensed under MIT.
