@@ -319,6 +319,74 @@ func TestManagerHealthyBecomesFalseAfterUnexpectedExit(t *testing.T) {
 	}
 }
 
+func TestManagerRestartsAfterUnexpectedExit(t *testing.T) {
+	first := newFakeProcess()
+	second := newFakeProcess()
+	second.signal = func() { second.complete(nil) }
+	manager, _, starts := newTestManager(t, first)
+	manager.startProcess = func(context.Context, string, []string) (process, error) {
+		(*starts)++
+		if *starts == 1 {
+			go first.writeLog("INFO: New display: 1080x1920/344 (id=18)")
+			return first, nil
+		}
+		go second.writeLog("INFO: New display: 1080x1920/344 (id=19)")
+		return second, nil
+	}
+	if _, err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first.complete(errors.New("unexpected exit"))
+	waitFor(t, func() bool { return !manager.Healthy(context.Background()) })
+	display, err := manager.Start(context.Background())
+	if err != nil || display.AndroidDisplayID != 19 || *starts != 2 {
+		t.Fatalf("display=%+v err=%v starts=%d", display, err, *starts)
+	}
+	if err := manager.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	firstWaits, _, _ := first.counts()
+	secondWaits, _, _ := second.counts()
+	if firstWaits != 1 || secondWaits != 1 {
+		t.Fatalf("waits first=%d second=%d", firstWaits, secondWaits)
+	}
+}
+
+func TestManagerStopDuringStartCancelsAndReapsProcess(t *testing.T) {
+	fake := newFakeProcess()
+	fake.kill = func() { fake.complete(nil) }
+	manager, recordPath, _ := newTestManager(t, fake)
+	started := make(chan struct{})
+	manager.startProcess = func(context.Context, string, []string) (process, error) {
+		close(started)
+		return fake, nil
+	}
+	startResult := make(chan error, 1)
+	go func() {
+		_, err := manager.Start(context.Background())
+		startResult <- err
+	}()
+	<-started
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-startResult; !errors.Is(err, context.Canceled) || !errors.Is(err, domain.ErrScrcpyStartup) {
+		t.Fatalf("start err=%v", err)
+	}
+	if manager.Healthy(context.Background()) {
+		t.Fatal("manager remained healthy after Stop during Start")
+	}
+	if _, err := os.Stat(recordPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("record file error=%v", err)
+	}
+	waits, _, kills := fake.counts()
+	if waits != 1 || kills != 1 {
+		t.Fatalf("waits=%d kills=%d", waits, kills)
+	}
+}
+
 func TestManagerStopBoundsGracefulWaitWithoutCallerDeadline(t *testing.T) {
 	fake := newFakeProcess()
 	fake.kill = func() { fake.complete(nil) }

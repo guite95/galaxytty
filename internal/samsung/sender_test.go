@@ -346,6 +346,37 @@ func TestSenderSerializesClipboardTransactions(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSenderCleansUnhealthyDisplayWhenDeviceDisconnectsDuringVerification(t *testing.T) {
+	sender, calls, display, _, _, store := senderFixture(t)
+	store.afterErr = domain.ErrOffline
+	_, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀")
+	if !errors.Is(err, domain.ErrOffline) || display.stops != 1 {
+		t.Fatalf("err=%v stops=%d", err, display.stops)
+	}
+	if !containsCall(*calls, "send.tap") || !containsCall(*calls, "display.stop") {
+		t.Fatalf("calls=%q", *calls)
+	}
+}
+
+func TestSenderVerificationTimeoutDoesNotTapOrRetryAgain(t *testing.T) {
+	sender, calls, display, _, _, store := senderFixture(t)
+	store.after = nil
+	sender.config.VerificationTimeout = 5 * time.Millisecond
+	_, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀")
+	if !errors.Is(err, domain.ErrSendVerificationTimeout) {
+		t.Fatalf("err=%v", err)
+	}
+	taps := 0
+	for _, call := range *calls {
+		if call == "send.tap" {
+			taps++
+		}
+	}
+	if taps != 1 || display.stops != 0 {
+		t.Fatalf("taps=%d stops=%d calls=%q", taps, display.stops, *calls)
+	}
+}
+
 func containsCall(calls []string, want string) bool {
 	for _, call := range calls {
 		if call == want {

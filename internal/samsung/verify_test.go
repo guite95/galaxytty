@@ -71,6 +71,7 @@ func (s *mmsVerificationStore) MMSMessagesAfter(context.Context, int64) ([]domai
 func TestVerifySentMatchesOnlyExactOutgoingRowAfterBaseline(t *testing.T) {
 	const body = "안녕하세요 😀"
 	store := &verificationStore{batches: [][]domain.Message{
+		nil,
 		{
 			{ID: 99, ThreadID: 49, Address: "+82 10-1234-5678", Body: body, Direction: domain.DirectionOutgoing},
 			{ID: 101, ThreadID: 49, Address: "+82 10-1234-5678", Body: body, Direction: domain.DirectionIncoming},
@@ -84,7 +85,7 @@ func TestVerifySentMatchesOnlyExactOutgoingRowAfterBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.MessageID != 104 || result.ThreadID != 49 || store.calls != 2 {
+	if result.MessageID != 104 || result.ThreadID != 49 || store.calls != 3 {
 		t.Fatalf("result=%+v calls=%d", result, store.calls)
 	}
 }
