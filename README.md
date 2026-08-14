@@ -245,6 +245,16 @@ Samsung sender
 - `internal/tui` and `internal/cli` never execute ADB, scrcpy, or clipboard
   commands directly.
 
+### Decision records
+
+- [RCS provider verification](docs/decisions/0001-rcs-provider-verification.md)
+  explains why a single gated send is followed by sanitized provider
+  observation after a verification timeout, without weakening production
+  success semantics or retrying.
+- [Virtual-display power behavior](docs/decisions/0002-virtual-display-power-behavior.md)
+  records why production sends omit `--keep-active`, wake, and cleanup sleep
+  mutations while gated integration tests retain read-only state checks.
+
 ## Development and integration safety
 
 The default suite is hardware-independent and never sends a message:
@@ -299,10 +309,11 @@ GALAXYTTY_MMS_TEST_RECIPIENT='explicit-mms-test-recipient' \
 go test -tags=integration ./internal/integration -run TestRealSamsungMMSTextSend -count=1 -v
 ```
 
-Each test sends at most once. The RCS test cannot PASS unless accessible
-evidence reliably classifies RCS; otherwise it reports the transport as
-unsupported after the one explicitly authorized observation. The MMS test
-requires exact outgoing MMS message, text-part, and recipient evidence.
+Each test sends at most once. After a production verification timeout, the RCS
+test performs one read-only query for rows after the pre-send baseline; it does
+not tap Send again. The test cannot PASS unless accessible evidence reliably
+classifies RCS, and otherwise reports the transport as unsupported. The MMS
+test requires exact outgoing MMS message, text-part, and recipient evidence.
 
 ## Known limitations
 
