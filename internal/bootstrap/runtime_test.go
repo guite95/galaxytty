@@ -98,6 +98,19 @@ func (b *syntheticADB) Shell(_ context.Context, target string, args ...string) (
 	return nil, fmt.Errorf("unexpected shell args %q", args)
 }
 
+func (b *syntheticADB) ShellStdin(_ context.Context, target, command string) ([]byte, error) {
+	if target != "USB123" {
+		return nil, fmt.Errorf("unexpected target %q", target)
+	}
+	if strings.HasPrefix(command, "am start --display 18 ") &&
+		strings.Contains(command, " -a android.intent.action.SENDTO ") &&
+		strings.Contains(command, " -p com.samsung.android.messaging") &&
+		strings.Contains(command, " --es sms_body ") {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("unexpected remote shell stdin command")
+}
+
 type lazyDisplay struct {
 	starts int
 	stops  int
@@ -161,7 +174,7 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 	backend.mu.Lock()
 	wakes, sleeps := backend.wakes, backend.sleeps
 	backend.mu.Unlock()
-	if wakes != 1 || sleeps != 1 {
+	if wakes != 0 || sleeps != 0 {
 		t.Fatalf("power lifecycle wakes=%d sleeps=%d", wakes, sleeps)
 	}
 	if messages, err := runtime.Service.Poll(context.Background(), 0); err != nil || len(messages) != 1 || messages[0].Direction != domain.DirectionOutgoing {

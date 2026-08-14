@@ -11,10 +11,16 @@ import (
 )
 
 type controllerDevice struct {
-	calls   [][]string
-	output  []byte
-	outputs [][]byte
-	err     error
+	calls      [][]string
+	stdinCalls []string
+	output     []byte
+	outputs    [][]byte
+	err        error
+}
+
+func (d *controllerDevice) ShellStdin(_ context.Context, command string) ([]byte, error) {
+	d.stdinCalls = append(d.stdinCalls, command)
+	return d.output, d.err
 }
 
 func (d *controllerDevice) State(context.Context) (domain.DeviceState, error) {
@@ -81,8 +87,6 @@ func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
 		{"dumpsys", "display"},
 		{"input", "-d", "18", "keyevent", "224"},
 		{"input", "-d", "18", "keyevent", "3"},
-		{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678", "-p", "com.samsung.android.messaging"},
-		{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678", "-p", "com.samsung.android.messaging", "--es", "sms_body", `'It'"'"'s 한글 😀'`},
 		{"input", "-d", "18", "tap", "500", "1800"},
 		{"input", "-d", "18", "keycombination", "113", "29"},
 		{"input", "-d", "18", "keyevent", "67"},
@@ -92,6 +96,13 @@ func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
 	}
 	if !reflect.DeepEqual(device.calls, want) {
 		t.Fatalf("calls=%q want=%q", device.calls, want)
+	}
+	wantStdin := []string{
+		"am start --display 18 -a android.intent.action.SENDTO -d 'smsto:01012345678' -p com.samsung.android.messaging\n",
+		`am start --display 18 -a android.intent.action.SENDTO -d 'smsto:01012345678' -p com.samsung.android.messaging --es sms_body 'It'"'"'s 한글 😀'` + "\n",
+	}
+	if !reflect.DeepEqual(device.stdinCalls, wantStdin) {
+		t.Fatalf("stdin calls=%q want=%q", device.stdinCalls, wantStdin)
 	}
 }
 

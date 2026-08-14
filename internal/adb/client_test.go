@@ -12,20 +12,41 @@ import (
 type recordingRunner struct {
 	name   string
 	args   []string
+	stdin  []byte
 	stdout []byte
 	stderr []byte
 	err    error
 	wait   bool
 }
 
-func (r *recordingRunner) Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+func (r *recordingRunner) Run(ctx context.Context, input []byte, name string, args ...string) ([]byte, []byte, error) {
 	r.name = name
 	r.args = append([]string(nil), args...)
+	r.stdin = append([]byte(nil), input...)
 	if r.wait {
 		<-ctx.Done()
 		return nil, nil, ctx.Err()
 	}
 	return r.stdout, r.stderr, r.err
+}
+
+func TestShellStdinKeepsPrivateCommandOutOfArgumentsAndErrors(t *testing.T) {
+	const recipient = "01012345678"
+	const body = "private 한글 😀 '$`\nbody"
+	command := "am start -d 'smsto:" + recipient + "' --es sms_body '" + body + "'\n"
+	runner := &recordingRunner{stderr: []byte("remote rejected " + command), err: errors.New("exit status 1")}
+	client := newClient("/synthetic/adb", time.Second, runner)
+	_, err := client.ShellStdin(context.Background(), "synthetic-target", command)
+	if err == nil {
+		t.Fatal("expected shell stdin error")
+	}
+	want := []string{"-s", "synthetic-target", "shell"}
+	if runner.name != "/synthetic/adb" || !reflect.DeepEqual(runner.args, want) || string(runner.stdin) != command {
+		t.Fatalf("name=%q args=%q stdin=%q", runner.name, runner.args, runner.stdin)
+	}
+	if strings.Contains(err.Error(), recipient) || strings.Contains(err.Error(), body) {
+		t.Fatalf("sensitive shell error leaked private data: %q", err)
+	}
 }
 
 func TestShellUsesSelectedTargetWithoutHostShell(t *testing.T) {

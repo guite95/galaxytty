@@ -22,7 +22,10 @@ const (
 )
 
 type Controller struct {
-	device domain.Device
+	device     domain.Device
+	stdinShell interface {
+		ShellStdin(context.Context, string) ([]byte, error)
+	}
 	layout Layout
 }
 
@@ -30,10 +33,16 @@ func NewController(device domain.Device, layout Layout) (*Controller, error) {
 	if device == nil {
 		return nil, errors.New("Samsung controller device is required")
 	}
+	stdinShell, ok := device.(interface {
+		ShellStdin(context.Context, string) ([]byte, error)
+	})
+	if !ok {
+		return nil, errors.New("Samsung controller requires remote shell stdin")
+	}
 	if err := layout.Validate(); err != nil {
 		return nil, err
 	}
-	return &Controller{device: device, layout: layout}, nil
+	return &Controller{device: device, stdinShell: stdinShell, layout: layout}, nil
 }
 
 func (c *Controller) OpenConversation(ctx context.Context, display domain.VirtualDisplay, phone string) error {
@@ -44,13 +53,11 @@ func (c *Controller) OpenConversation(ctx context.Context, display domain.Virtua
 	if phone == "" {
 		return safeControllerError{kind: domain.ErrConversationOpen, cause: errors.New("recipient is required")}
 	}
-	return c.run(ctx, domain.ErrConversationOpen,
-		"am", "start",
-		"--display", displayID(display),
-		"-a", "android.intent.action.SENDTO",
-		"-d", "smsto:"+phone,
-		"-p", MessagesPackage,
-	)
+	command, err := sendToCommand(display, phone, "")
+	if err != nil {
+		return safeControllerError{kind: domain.ErrConversationOpen, cause: err}
+	}
+	return c.runStdin(ctx, domain.ErrConversationOpen, command)
 }
 
 func (c *Controller) EnsureDefaultSMSHandler(ctx context.Context) error {
@@ -65,18 +72,11 @@ func (c *Controller) OpenConversationWithBody(ctx context.Context, display domai
 	if phone == "" || strings.TrimSpace(body) == "" {
 		return safeControllerError{kind: domain.ErrConversationOpen, cause: errors.New("recipient and message body are required")}
 	}
-	quotedBody, err := quoteRemoteShellArg(body)
+	command, err := sendToCommand(display, phone, body)
 	if err != nil {
 		return safeControllerError{kind: domain.ErrConversationOpen, cause: err}
 	}
-	return c.run(ctx, domain.ErrConversationOpen,
-		"am", "start",
-		"--display", displayID(display),
-		"-a", "android.intent.action.SENDTO",
-		"-d", "smsto:"+phone,
-		"-p", MessagesPackage,
-		"--es", "sms_body", quotedBody,
-	)
+	return c.runStdin(ctx, domain.ErrConversationOpen, command)
 }
 
 func (c *Controller) MainDisplayOff(ctx context.Context) (bool, error) {
@@ -174,6 +174,18 @@ func (c *Controller) run(ctx context.Context, kind error, args ...string) error 
 	return nil
 }
 
+func (c *Controller) runStdin(ctx context.Context, kind error, command string) error {
+	output, err := c.stdinShell.ShellStdin(ctx, command+"\n")
+	if err != nil {
+		return safeControllerError{kind: kind, cause: err}
+	}
+	lower := strings.ToLower(strings.TrimSpace(string(output)))
+	if strings.HasPrefix(lower, "error:") || strings.Contains(lower, "exception") {
+		return safeControllerError{kind: kind, cause: errors.New("Android command reported an error")}
+	}
+	return nil
+}
+
 func validateDisplay(display domain.VirtualDisplay) error {
 	if display.AndroidDisplayID <= 0 {
 		return domain.ErrVirtualDisplayIDNotFound
@@ -190,6 +202,23 @@ func quoteRemoteShellArg(value string) (string, error) {
 		return "", errors.New("NUL bytes are not supported")
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'", nil
+}
+
+func sendToCommand(display domain.VirtualDisplay, phone, body string) (string, error) {
+	uri, err := quoteRemoteShellArg("smsto:" + phone)
+	if err != nil {
+		return "", err
+	}
+	command := "am start --display " + displayID(display) +
+		" -a android.intent.action.SENDTO -d " + uri + " -p " + MessagesPackage
+	if body == "" {
+		return command, nil
+	}
+	quotedBody, err := quoteRemoteShellArg(body)
+	if err != nil {
+		return "", err
+	}
+	return command + " --es sms_body " + quotedBody, nil
 }
 
 func parseDisplayZeroOff(output string) (off, ok bool) {

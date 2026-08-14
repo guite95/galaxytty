@@ -17,6 +17,10 @@ type Backend interface {
 	Shell(context.Context, string, ...string) ([]byte, error)
 }
 
+type StdinBackend interface {
+	ShellStdin(context.Context, string, string) ([]byte, error)
+}
+
 type SelectionOptions struct {
 	PreferUSB bool
 	Target    string
@@ -178,6 +182,21 @@ func (t *Target) State(context.Context) (domain.DeviceState, error) {
 
 func (t *Target) Shell(ctx context.Context, args ...string) ([]byte, error) {
 	output, err := t.backend.Shell(ctx, t.info.Serial, args...)
+	t.updateState(err)
+	return output, err
+}
+
+func (t *Target) ShellStdin(ctx context.Context, command string) ([]byte, error) {
+	backend, ok := t.backend.(StdinBackend)
+	if !ok {
+		return nil, errors.New("ADB backend does not support remote shell stdin")
+	}
+	output, err := backend.ShellStdin(ctx, t.info.Serial, command)
+	t.updateState(err)
+	return output, err
+}
+
+func (t *Target) updateState(err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	switch {
@@ -188,7 +207,6 @@ func (t *Target) Shell(ctx context.Context, args ...string) ([]byte, error) {
 	case errors.Is(err, ErrOffline), errors.Is(err, ErrNoDevices):
 		t.state = domain.DeviceDisconnected
 	}
-	return output, err
 }
 
 func (t *Target) Status(context.Context) domain.ApplicationStatus {

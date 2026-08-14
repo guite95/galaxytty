@@ -16,6 +16,17 @@ type fakeBackend struct {
 	shellErr map[string]error
 }
 
+type fakeStdinBackend struct {
+	*fakeBackend
+	target, command string
+	err             error
+}
+
+func (f *fakeStdinBackend) ShellStdin(_ context.Context, target, command string) ([]byte, error) {
+	f.target, f.command = target, command
+	return nil, f.err
+}
+
 func (f *fakeBackend) Devices(context.Context) ([]Device, error) {
 	return append([]Device(nil), f.devices...), nil
 }
@@ -150,6 +161,25 @@ func TestTargetUpdatesCachedStatusAfterOfflineError(t *testing.T) {
 	backend.shellErr["USB123|getprop ro.product.model"] = ErrOffline
 	if _, err := target.Shell(context.Background(), "getprop", "ro.product.model"); !errors.Is(err, ErrOffline) {
 		t.Fatalf("err=%v", err)
+	}
+	if got := target.Status(context.Background()); got.Label != "Offline" || got.State != string(domain.DeviceDisconnected) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTargetShellStdinUsesSelectedEndpointAndUpdatesOfflineState(t *testing.T) {
+	backend := &fakeStdinBackend{fakeBackend: sameGalaxyBackend()}
+	target, err := Discover(context.Background(), backend, SelectionOptions{PreferUSB: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.err = ErrOffline
+	const command = "synthetic private command\n"
+	if _, err := target.ShellStdin(context.Background(), command); !errors.Is(err, ErrOffline) {
+		t.Fatalf("err=%v", err)
+	}
+	if backend.target != "USB123" || backend.command != command {
+		t.Fatalf("target=%q command=%q", backend.target, backend.command)
 	}
 	if got := target.Status(context.Background()); got.Label != "Offline" || got.State != string(domain.DeviceDisconnected) {
 		t.Fatalf("%+v", got)

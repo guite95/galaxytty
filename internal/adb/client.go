@@ -11,14 +11,17 @@ import (
 )
 
 type runner interface {
-	Run(context.Context, string, ...string) ([]byte, []byte, error)
+	Run(context.Context, []byte, string, ...string) ([]byte, []byte, error)
 }
 
 type execRunner struct{}
 
-func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+func (execRunner) Run(ctx context.Context, input []byte, name string, args ...string) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout, stderr bytes.Buffer
+	if input != nil {
+		cmd.Stdin = bytes.NewReader(input)
+	}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -77,7 +80,18 @@ func (c *Client) Shell(ctx context.Context, target string, args ...string) ([]by
 	return c.run(ctx, commandArgs...)
 }
 
+func (c *Client) ShellStdin(ctx context.Context, target, command string) ([]byte, error) {
+	if strings.TrimSpace(command) == "" || strings.IndexByte(command, 0) >= 0 {
+		return nil, errors.New("invalid remote shell command")
+	}
+	return c.runCommand(ctx, []byte(command), true, "-s", target, "shell")
+}
+
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	return c.runCommand(ctx, nil, false, args...)
+}
+
+func (c *Client) runCommand(ctx context.Context, input []byte, sensitive bool, args ...string) ([]byte, error) {
 	runCtx := ctx
 	cancel := func() {}
 	if c.timeout > 0 {
@@ -85,7 +99,7 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 	defer cancel()
 
-	stdout, stderr, err := c.runner.Run(runCtx, c.path, args...)
+	stdout, stderr, err := c.runner.Run(runCtx, input, c.path, args...)
 	if runCtx.Err() != nil {
 		return nil, runCtx.Err()
 	}
@@ -104,6 +118,9 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil, err
+	}
+	if sensitive {
+		return nil, &CommandError{Args: append([]string(nil), args...), Err: err}
 	}
 	return nil, &CommandError{Args: append([]string(nil), args...), Stderr: string(stderr), Err: err}
 }

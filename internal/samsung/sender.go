@@ -17,10 +17,7 @@ type MessageController interface {
 	domain.ConversationController
 	EnsureDefaultSMSHandler(context.Context) error
 	OpenConversationWithBody(context.Context, domain.VirtualDisplay, string, string) error
-	MainDisplayOff(context.Context) (bool, error)
-	WakeVirtualDisplay(context.Context, domain.VirtualDisplay) error
 	ShowHome(context.Context, domain.VirtualDisplay) error
-	SleepMainDisplay(context.Context) error
 	FocusComposer(context.Context, domain.VirtualDisplay) error
 	ClearComposer(context.Context, domain.VirtualDisplay) error
 	Paste(context.Context, domain.VirtualDisplay) error
@@ -94,27 +91,6 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 	display, err := s.display.Start(ctx)
 	if err != nil {
 		return domain.SendResult{}, fmt.Errorf("start virtual display: %w", err)
-	}
-	mainWasOff, err := s.controller.MainDisplayOff(ctx)
-	if err != nil {
-		return domain.SendResult{}, s.controllerError(err)
-	}
-	if mainWasOff {
-		defer func() {
-			restoreCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-			defer cancel()
-			if restoreErr := s.controller.SleepMainDisplay(restoreCtx); restoreErr != nil {
-				restoreErr = fmt.Errorf("restore main display power: %w", restoreErr)
-				if err == nil {
-					err = restoreErr
-				} else {
-					err = errors.Join(err, restoreErr)
-				}
-			}
-		}()
-		if err := s.controller.WakeVirtualDisplay(ctx, display); err != nil {
-			return domain.SendResult{}, s.controllerError(err)
-		}
 	}
 	if s.config.InputMode == domain.TextInputIntentBody {
 		if err := s.controller.OpenConversationWithBody(ctx, display, normalizedPhone, text); err != nil {

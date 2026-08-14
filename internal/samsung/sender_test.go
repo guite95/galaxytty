@@ -46,10 +46,9 @@ func (d *senderDisplay) Stop(context.Context) error {
 func (d *senderDisplay) Healthy(context.Context) bool { return d.err == nil }
 
 type senderController struct {
-	calls      *[]string
-	failAt     string
-	err        error
-	mainWasOff bool
+	calls  *[]string
+	failAt string
+	err    error
 }
 
 func (c *senderController) call(name string) error {
@@ -68,17 +67,8 @@ func (c *senderController) EnsureDefaultSMSHandler(context.Context) error {
 func (c *senderController) OpenConversationWithBody(context.Context, domain.VirtualDisplay, string, string) error {
 	return c.call("conversation.open-body")
 }
-func (c *senderController) MainDisplayOff(context.Context) (bool, error) {
-	return c.mainWasOff, c.call("power.read")
-}
-func (c *senderController) WakeVirtualDisplay(context.Context, domain.VirtualDisplay) error {
-	return c.call("power.wake")
-}
 func (c *senderController) ShowHome(context.Context, domain.VirtualDisplay) error {
 	return c.call("display.home")
-}
-func (c *senderController) SleepMainDisplay(context.Context) error {
-	return c.call("power.restore")
 }
 func (c *senderController) FocusComposer(context.Context, domain.VirtualDisplay) error {
 	return c.call("composer.tap")
@@ -140,7 +130,7 @@ func senderFixture(t *testing.T) (*Sender, *[]string, *senderDisplay, *senderCon
 	t.Helper()
 	calls := []string{}
 	display := &senderDisplay{calls: &calls}
-	controller := &senderController{calls: &calls, err: errors.New("synthetic controller failure"), mainWasOff: true}
+	controller := &senderController{calls: &calls, err: errors.New("synthetic controller failure")}
 	clip := &senderClipboard{calls: &calls, old: "old clipboard", setError: map[int]error{}}
 	store := &senderStore{
 		calls:  &calls,
@@ -184,10 +174,10 @@ func TestSenderRunsVerifiedSequenceAndRestoresClipboard(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	want := []string{
-		"role.check", "display.start", "power.read", "power.wake", "display.home",
+		"role.check", "display.start", "display.home",
 		"clipboard.read", "clipboard.set", "display.clipboard-sync", "wait.sync",
 		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "wait.settle",
-		"store.latest", "send.tap", "store.after", "clipboard.restore", "power.restore",
+		"store.latest", "send.tap", "store.after", "clipboard.restore",
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls=%q want=%q", *calls, want)
@@ -205,9 +195,9 @@ func TestSenderUsesVerifiedIntentBodyCompatibilityPath(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	want := []string{
-		"role.check", "display.start", "power.read", "power.wake", "conversation.open-body",
+		"role.check", "display.start", "conversation.open-body",
 		"wait.ready", "composer.tap", "wait.settle", "store.latest", "send.tap",
-		"store.after", "power.restore",
+		"store.after",
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls=%q want=%q", *calls, want)
@@ -222,9 +212,9 @@ func TestSenderStopsDisplayAfterControllerFailure(t *testing.T) {
 		t.Fatalf("err=%v stops=%d", err, display.stops)
 	}
 	want := []string{
-		"role.check", "display.start", "power.read", "power.wake", "display.home",
+		"role.check", "display.start", "display.home",
 		"clipboard.read", "clipboard.set", "display.clipboard-sync", "wait.sync",
-		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "display.stop", "clipboard.restore", "power.restore",
+		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "display.stop", "clipboard.restore",
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls=%q want=%q", *calls, want)
@@ -255,33 +245,36 @@ func TestSenderStopsBeforePasteWhenComposerClearFails(t *testing.T) {
 	}
 }
 
-func TestSenderDoesNotChangePowerWhenMainDisplayWasOn(t *testing.T) {
-	sender, calls, _, controller, _, _ := senderFixture(t)
-	controller.mainWasOff = false
+func TestSenderNeverChangesMainDisplayPower(t *testing.T) {
+	sender, calls, _, _, _, _ := senderFixture(t)
 	if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); err != nil {
 		t.Fatal(err)
 	}
-	if containsCall(*calls, "power.wake") || containsCall(*calls, "power.restore") {
-		t.Fatalf("unexpected power change: %q", *calls)
+	for _, forbidden := range []string{"power.read", "power.wake", "power.restore"} {
+		if containsCall(*calls, forbidden) {
+			t.Fatalf("unexpected %s call: %q", forbidden, *calls)
+		}
 	}
 }
 
-func TestSenderRestoresPowerAfterFailure(t *testing.T) {
+func TestSenderDoesNotMutatePowerAfterFailure(t *testing.T) {
 	sender, calls, _, controller, _, _ := senderFixture(t)
 	controller.failAt = "conversation.open"
 	if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); !errors.Is(err, controller.err) {
 		t.Fatalf("err=%v", err)
 	}
-	if !containsCall(*calls, "power.restore") {
-		t.Fatalf("main display power was not restored: %q", *calls)
+	for _, forbidden := range []string{"power.read", "power.wake", "power.restore"} {
+		if containsCall(*calls, forbidden) {
+			t.Fatalf("unexpected %s call: %q", forbidden, *calls)
+		}
 	}
 }
 
 func TestSenderStopsAtClipboardAndBaselineFailures(t *testing.T) {
 	for _, tc := range []struct {
-		name              string
-		configure         func(*senderClipboard, *senderStore)
-		wantBeforeRestore string
+		name      string
+		configure func(*senderClipboard, *senderStore)
+		wantLast  string
 	}{
 		{"read", func(c *senderClipboard, _ *senderStore) { c.readErr = errors.New("read failed") }, "clipboard.read"},
 		{"set", func(c *senderClipboard, _ *senderStore) { c.setError[1] = errors.New("set failed") }, "clipboard.set"},
@@ -293,11 +286,8 @@ func TestSenderStopsAtClipboardAndBaselineFailures(t *testing.T) {
 			if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); err == nil {
 				t.Fatal("expected send error")
 			}
-			if got := (*calls)[len(*calls)-1]; got != "power.restore" {
+			if got := (*calls)[len(*calls)-1]; got != tc.wantLast {
 				t.Fatalf("last call=%q calls=%q", got, *calls)
-			}
-			if got := (*calls)[len(*calls)-2]; got != tc.wantBeforeRestore {
-				t.Fatalf("call before power restore=%q calls=%q", got, *calls)
 			}
 			for _, forbidden := range []string{"send.tap", "store.after"} {
 				if containsCall(*calls, forbidden) {
