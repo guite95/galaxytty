@@ -89,7 +89,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = max(30, x.Width)
 		m.height = max(10, x.Height)
 	case conversationsMsg:
-		m.conversations = x.items
+		m.replaceConversations(x.items)
 		m.setError(x.err)
 		m.status = m.service.Status(m.ctx).Label
 	case messagesMsg:
@@ -199,6 +199,29 @@ func (m Model) selectedID() int64 {
 	}
 	return 0
 }
+
+func (m *Model) replaceConversations(items []domain.Conversation) {
+	selectedThreadID := m.selectedID()
+	m.conversations = items
+	if len(items) == 0 {
+		m.cursor = 0
+		if m.screen == chatScreen {
+			m.screen = conversationsScreen
+			m.messages = nil
+		}
+		return
+	}
+	if selectedThreadID != 0 {
+		for index, conversation := range items {
+			if conversation.ThreadID == selectedThreadID {
+				m.cursor = index
+				return
+			}
+		}
+	}
+	m.cursor = min(m.cursor, len(items)-1)
+}
+
 func (m *Model) setError(e error) {
 	if e != nil {
 		if errors.Is(e, domain.ErrSendingNotImplemented) {
@@ -239,7 +262,12 @@ func (m Model) View() string {
 }
 func (m Model) renderConversations(w, h int) string {
 	lines := []string{"Conversations"}
-	for i, c := range m.conversations {
+	visible := max(1, (h-1)/2)
+	start := max(0, m.cursor-visible/2)
+	end := min(len(m.conversations), start+visible)
+	start = max(0, end-visible)
+	for i := start; i < end; i++ {
+		c := m.conversations[i]
 		mark := "  "
 		if c.UnreadCount > 0 {
 			mark = "● "

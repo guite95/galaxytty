@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/domain"
@@ -152,6 +153,45 @@ func TestProviderErrorRefreshesOfflineStatus(t *testing.T) {
 	updated, _ := model.Update(messagesMsg{err: errors.New("synthetic provider error")})
 	if got := updated.(Model).status; got != "Offline" {
 		t.Fatalf("status=%q", got)
+	}
+}
+
+func TestConversationRefreshKeepsSelectedThread(t *testing.T) {
+	model, _ := fixture(t)
+	model.cursor = 1
+	selectedThreadID := model.selectedID()
+	refreshed := []domain.Conversation{
+		{ThreadID: selectedThreadID, Title: "Selected"},
+		{ThreadID: 1, Title: "First"},
+		{ThreadID: 3, Title: "Third"},
+	}
+	updated, _ := model.Update(conversationsMsg{items: refreshed})
+	got := updated.(Model)
+	if got.cursor != 0 || got.selectedID() != selectedThreadID {
+		t.Fatalf("cursor=%d selected=%d", got.cursor, got.selectedID())
+	}
+}
+
+func TestConversationListRendersOnlyVisibleWindow(t *testing.T) {
+	model, _ := fixture(t)
+	model.conversations = make([]domain.Conversation, 30)
+	for index := range model.conversations {
+		model.conversations[index] = domain.Conversation{
+			ThreadID: int64(index + 1),
+			Title:    fmt.Sprintf("Conversation %02d", index),
+			Snippet:  "Synthetic snippet",
+		}
+	}
+	model.cursor = 20
+	rendered := model.renderConversations(24, 10)
+	if !strings.Contains(rendered, "Conversation 20") {
+		t.Fatal("selected conversation is outside rendered window")
+	}
+	if strings.Contains(rendered, "Conversation 00") {
+		t.Fatal("off-screen conversation was rendered")
+	}
+	if lines := strings.Count(rendered, "\n") + 1; lines > 10 {
+		t.Fatalf("rendered lines=%d", lines)
 	}
 }
 
