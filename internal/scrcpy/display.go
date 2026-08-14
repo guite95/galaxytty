@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-var displayIDRE = regexp.MustCompile(`New display:.*\(id=([0-9]+)\)`)
+var displayIDRE = regexp.MustCompile(`New display:\s+[0-9]+x[0-9]+(?:/[0-9]+)?\s+\(id=([0-9]+)\)`)
 var versionRE = regexp.MustCompile(`(?m)^scrcpy ([0-9]+(?:\.[0-9]+)*)\b`)
 
 type VersionInfo struct {

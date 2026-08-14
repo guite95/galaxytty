@@ -14,4 +14,8 @@ var (
 	ErrWirelessDiscoveryUnavailable = errors.New("wireless ADB discovery is unavailable")
 	ErrProviderPermissionDenied     = errors.New("Android provider permission denied")
 	ErrProviderOutput               = errors.New("malformed Android provider output")
+	ErrScrcpyNotFound               = errors.New("scrcpy executable not found")
+	ErrScrcpyStartup                = errors.New("scrcpy startup failed")
+	ErrVirtualDisplayIDNotFound     = errors.New("virtual display ID not found")
+	ErrScrcpyExited                 = errors.New("scrcpy exited unexpectedly")
 )
