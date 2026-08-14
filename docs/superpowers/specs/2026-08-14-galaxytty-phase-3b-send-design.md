@@ -139,7 +139,9 @@ remain for regression tests if useful.
 
 `scrcpy.Manager` implements `domain.VirtualDisplayManager` and is constructed
 with the selected ADB target string plus a small config containing executable,
-resolution, package, and startup timeout. Production defaults are:
+resolution, package, and startup timeout. Construction validates only static
+configuration; executable lookup is deferred to `Start` so read-only commands
+remain usable when scrcpy is absent. Production defaults are:
 
 ```text
 scrcpy
@@ -216,7 +218,10 @@ not include recipient or message text.
 
 ## macOS clipboard adapter
 
-`internal/clipboard.Mac` uses direct subprocess execution:
+`internal/clipboard.Mac` uses direct subprocess execution. Construction stores
+command names without resolving them; lookup and execution happen only when a
+send calls `Read` or `Set`, preserving read-only startup when clipboard tooling
+is unavailable:
 
 - `pbpaste` returns the current clipboard bytes.
 - `pbcopy` receives the new bytes on stdin.
