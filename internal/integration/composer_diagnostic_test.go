@@ -233,7 +233,7 @@ func safeComposerDiagnosticError(err error) string {
 
 func logComposerDiagnosticResult(t *testing.T, mode string, result composerDiagnosticResult) {
 	t.Helper()
-	t.Logf("MODE=%s VD_STARTED=%t START_STATE=%s READY_STATE=%s SENDTO_STATE=%s FOCUS_STATE=%s SAMSUNG_TASK_ON_VD=%t SAMSUNG_RESUMED_ON_VD=%t FOCUSED_DISPLAY=%t FOCUSED_APPLICATION=%t FOCUSED_WINDOW=%t SENDTO_ACCEPTED=%t FOCUS_ACCEPTED=%t COMPOSER_READY=%t COMPOSER_CLEARED=%t VD_STOPPED=%t VD_REMOVED=%t MAIN_DISPLAY_PRESERVED=%t",
+	t.Logf("MODE=%s VD_STARTED=%t START_STATE=%s READY_STATE=%s SENDTO_STATE=%s FOCUS_STATE=%s SAMSUNG_TASK_ON_VD=%t SAMSUNG_RESUMED_ON_VD=%t CURRENT_FOCUSED_DISPLAY=%t CURRENT_FOCUSED_APPLICATION=%t CURRENT_FOCUSED_WINDOW=%t SENDTO_ACCEPTED=%t FOCUS_ACCEPTED=%t COMPOSER_READY=%t COMPOSER_CLEARED=%t VD_STOPPED=%t VD_REMOVED=%t MAIN_DISPLAY_PRESERVED=%t",
 		mode,
 		result.started,
 		result.afterStartup.displayState,
@@ -242,9 +242,9 @@ func logComposerDiagnosticResult(t *testing.T, mode string, result composerDiagn
 		result.afterFocus.displayState,
 		result.afterFocus.samsungTaskOnVD,
 		result.afterFocus.samsungResumedOnVD,
-		result.afterFocus.focusedDisplay,
-		result.afterFocus.focusedApplication,
-		result.afterFocus.focusedWindow,
+		result.afterFocus.currentFocusedDisplay,
+		result.afterFocus.currentFocusedApplication,
+		result.afterFocus.currentFocusedWindow,
 		result.sendToAccepted,
 		result.focusAccepted,
 		result.afterFocus.composerReady(),
@@ -271,16 +271,21 @@ func classifyKeepActiveDifference(current, keepActive composerDiagnosticResult) 
 }
 
 type composerDiagnosticState struct {
-	displayState       string
-	samsungTaskOnVD    bool
-	samsungResumedOnVD bool
-	focusedDisplay     bool
-	focusedApplication bool
-	focusedWindow      bool
+	displayState              string
+	samsungTaskOnVD           bool
+	samsungResumedOnVD        bool
+	currentFocusedDisplay     bool
+	currentFocusedApplication bool
+	currentFocusedWindow      bool
 }
 
 func (s composerDiagnosticState) composerReady() bool {
-	return s.displayState == "ON" && s.samsungTaskOnVD && s.focusedApplication && s.focusedWindow
+	return s.displayState == "ON" &&
+		s.samsungTaskOnVD &&
+		s.samsungResumedOnVD &&
+		s.currentFocusedDisplay &&
+		s.currentFocusedApplication &&
+		s.currentFocusedWindow
 }
 
 func parseComposerDiagnosticState(displayID int64, displayOutput, activityOutput, inputOutput string) composerDiagnosticState {
@@ -290,9 +295,10 @@ func parseComposerDiagnosticState(displayID int64, displayOutput, activityOutput
 	state := composerDiagnosticState{displayState: parseDiagnosticDisplayState(displaySection)}
 	state.samsungTaskOnVD = strings.Contains(activitySection, realSamsungMessagesPackage)
 	state.samsungResumedOnVD = diagnosticLineContains(activitySection, realSamsungMessagesPackage, "mResumedActivity", "topResumedActivity")
-	state.focusedDisplay = regexp.MustCompile(`(?m)^\s*FocusedDisplayId:\s*` + regexp.QuoteMeta(id) + `\s*$`).MatchString(inputOutput)
-	state.focusedApplication = diagnosticNamedBlocksContain(inputOutput, "FocusedApplications:", "FocusedWindows:", id, realSamsungMessagesPackage)
-	state.focusedWindow = diagnosticNamedBlocksContain(inputOutput, "FocusedWindows:", "FocusRequests:", id, realSamsungMessagesPackage)
+	currentInput := currentInputSnapshot(inputOutput)
+	state.currentFocusedDisplay = regexp.MustCompile(`(?m)^\s*FocusedDisplayId:\s*` + regexp.QuoteMeta(id) + `\s*$`).MatchString(currentInput)
+	state.currentFocusedApplication = diagnosticDisplayLineContains(currentInputBlock(currentInput, "FocusedApplications:", "FocusedWindows:"), id, realSamsungMessagesPackage)
+	state.currentFocusedWindow = diagnosticDisplayLineContains(currentInputBlock(currentInput, "FocusedWindows:", ""), id, realSamsungMessagesPackage)
 	return state
 }
 
@@ -309,22 +315,27 @@ func diagnosticSection(output, startPattern, nextPattern string) string {
 	return output[start[0] : start[1]+next[0]]
 }
 
-func diagnosticNamedBlocksContain(output, start, end, displayID, value string) bool {
-	for {
-		startIndex := strings.Index(output, start)
-		if startIndex < 0 {
-			return false
-		}
-		rest := output[startIndex+len(start):]
-		endIndex := strings.Index(rest, end)
-		if endIndex < 0 {
-			return diagnosticDisplayLineContains(rest, displayID, value)
-		}
-		if diagnosticDisplayLineContains(rest[:endIndex], displayID, value) {
-			return true
-		}
-		output = rest[endIndex+len(end):]
+func currentInputSnapshot(output string) string {
+	if index := regexp.MustCompile(`(?m)^\s*FocusRequests:\s*$`).FindStringIndex(output); index != nil {
+		return output[:index[0]]
 	}
+	return output
+}
+
+func currentInputBlock(output, start, end string) string {
+	startIndex := strings.Index(output, start)
+	if startIndex < 0 {
+		return ""
+	}
+	rest := output[startIndex+len(start):]
+	if end == "" {
+		return rest
+	}
+	endIndex := strings.Index(rest, end)
+	if endIndex < 0 {
+		return ""
+	}
+	return rest[:endIndex]
 }
 
 func parseDiagnosticDisplayState(section string) string {

@@ -11,7 +11,7 @@ import (
 	"github.com/galaxytty/galaxytty/internal/domain"
 )
 
-func TestParseComposerDiagnosticStateScopesEvidenceToRuntimeDisplay(t *testing.T) {
+func TestParseComposerDiagnosticStateIgnoresFocusRequestsForCurrentFocus(t *testing.T) {
 	displayOutput := `
   Display 0:
     mBaseDisplayInfo=DisplayInfo{"main", displayId 0, state OFF, type INTERNAL}
@@ -43,15 +43,80 @@ Display #27 (activities from top to bottom):
 
 	got := parseComposerDiagnosticState(27, displayOutput, activityOutput, inputOutput)
 	want := composerDiagnosticState{
-		displayState:       "ON",
-		samsungTaskOnVD:    true,
-		samsungResumedOnVD: true,
-		focusedDisplay:     true,
-		focusedApplication: true,
-		focusedWindow:      true,
+		displayState:              "ON",
+		samsungTaskOnVD:           true,
+		samsungResumedOnVD:        true,
+		currentFocusedDisplay:     false,
+		currentFocusedApplication: false,
+		currentFocusedWindow:      false,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("state=%+v want=%+v", got, want)
+	}
+}
+
+func TestParseComposerDiagnosticStateDoesNotBorrowFocusRequestsApplication(t *testing.T) {
+	got := parseComposerDiagnosticState(27,
+		`  Display 27:
+    mBaseDisplayInfo=DisplayInfo{"scrcpy", displayId 27, state ON, type VIRTUAL}`,
+		`Display #27 (activities from top to bottom):
+  * Task{diagnostic A=com.samsung.android.messaging visible=true}
+  mResumedActivity: ActivityRecord{synthetic com.samsung.android.messaging/.ConversationComposer}`,
+		`FocusedDisplayId: 27
+FocusedApplications:
+  displayId=27, name='ActivityRecord{synthetic com.sec.android.app.launcher/.Launcher}'
+FocusedWindows:
+  displayId=27, name='synthetic com.samsung.android.messaging/.ConversationComposer'
+FocusRequests:
+  displayId=27, name='ActivityRecord{synthetic com.samsung.android.messaging/.ConversationComposer}'`,
+	)
+	if got.currentFocusedApplication {
+		t.Fatalf("current application=%t; FocusRequests evidence must not count", got.currentFocusedApplication)
+	}
+	if got.composerReady() {
+		t.Fatalf("state=%+v; composer cannot be ready without current Samsung application", got)
+	}
+}
+
+func TestParseComposerDiagnosticStateDoesNotBorrowFocusRequestsWindow(t *testing.T) {
+	got := parseComposerDiagnosticState(27,
+		`  Display 27:
+    mBaseDisplayInfo=DisplayInfo{"scrcpy", displayId 27, state ON, type VIRTUAL}`,
+		`Display #27 (activities from top to bottom):
+  * Task{diagnostic A=com.samsung.android.messaging visible=true}
+  mResumedActivity: ActivityRecord{synthetic com.samsung.android.messaging/.ConversationComposer}`,
+		`FocusedDisplayId: 27
+FocusedApplications:
+  displayId=27, name='ActivityRecord{synthetic com.samsung.android.messaging/.ConversationComposer}'
+FocusedWindows:
+  displayId=27, name='synthetic NotificationShade'
+FocusRequests:
+  displayId=27, name='synthetic com.samsung.android.messaging/.ConversationComposer'`,
+	)
+	if got.currentFocusedWindow {
+		t.Fatalf("current window=%t; FocusRequests evidence must not count", got.currentFocusedWindow)
+	}
+	if got.composerReady() {
+		t.Fatalf("state=%+v; composer cannot be ready without current Samsung window", got)
+	}
+}
+
+func TestParseComposerDiagnosticStateRequiresCurrentInputAndResumedActivity(t *testing.T) {
+	got := parseComposerDiagnosticState(27,
+		`  Display 27:
+    mBaseDisplayInfo=DisplayInfo{"scrcpy", displayId 27, state ON, type VIRTUAL}`,
+		`Display #27 (activities from top to bottom):
+  * Task{diagnostic A=com.samsung.android.messaging visible=true}
+  mResumedActivity: ActivityRecord{synthetic com.samsung.android.messaging/.ConversationComposer}`,
+		`FocusedDisplayId: 27
+FocusedApplications:
+  displayId=27, name='ActivityRecord{synthetic com.samsung.android.messaging/.ConversationComposer}'
+FocusedWindows:
+  displayId=27, name='synthetic com.samsung.android.messaging/.ConversationComposer'
+FocusRequests:`,
+	)
+	if !got.currentFocusedDisplay || !got.currentFocusedApplication || !got.currentFocusedWindow || !got.composerReady() {
+		t.Fatalf("state=%+v; want current Samsung input-capable composer", got)
 	}
 }
 
