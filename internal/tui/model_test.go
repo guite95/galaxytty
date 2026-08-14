@@ -96,6 +96,22 @@ func TestSlashCommands(t *testing.T) {
 		t.Fatal(u.(Model).errorText)
 	}
 }
+
+func TestCtrlCShutsDown(t *testing.T) {
+	m, _ := fixture(t)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("missing shutdown command")
+	}
+	updated, cmd = updated.(Model).Update(cmd())
+	if cmd == nil {
+		t.Fatal("missing quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("shutdown did not quit")
+	}
+}
+
 func TestAsyncIncomingRefresh(t *testing.T) {
 	m, b := fixture(t)
 	m = open(t, m)
