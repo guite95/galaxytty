@@ -73,6 +73,17 @@ func TestQueryMapsProviderErrorsWithoutRowData(t *testing.T) {
 	}
 }
 
+func TestQueryMapsPermissionDeniedShellErrorWithoutDetails(t *testing.T) {
+	store := NewStore(&fakeShell{err: errors.New("java.lang.SecurityException: Permission Denial: private-value")})
+	_, err := store.query(context.Background(), Query{URI: "content://sms", Projection: []string{"_id"}})
+	if !errors.Is(err, ErrProviderPermissionDenied) {
+		t.Fatalf("err=%v", err)
+	}
+	if strings.Contains(err.Error(), "private-value") {
+		t.Fatalf("provider data leaked in error: %v", err)
+	}
+}
+
 func TestQueryRejectsUnsafeRemoteClause(t *testing.T) {
 	store := NewStore(&fakeShell{})
 	_, err := store.query(context.Background(), Query{

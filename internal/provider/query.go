@@ -44,12 +44,14 @@ func (s *Store) query(ctx context.Context, query Query) ([]map[string]string, er
 
 	output, err := s.shell.Shell(ctx, args...)
 	if err != nil {
+		if permissionDeniedText(err.Error()) {
+			return nil, fmt.Errorf("%w: %s", ErrProviderPermissionDenied, query.URI)
+		}
 		return nil, fmt.Errorf("query %s: %w", query.URI, err)
 	}
 	text := string(output)
-	lower := strings.ToLower(text)
 	switch {
-	case strings.Contains(lower, "permission denial"), strings.Contains(lower, "permission denied"), strings.Contains(lower, "securityexception"):
+	case permissionDeniedText(text):
 		return nil, fmt.Errorf("%w: %s", ErrProviderPermissionDenied, query.URI)
 	case strings.Contains(text, "[ERROR]"):
 		return nil, fmt.Errorf("%w: content query failed for %s", ErrProviderOutput, query.URI)
@@ -64,6 +66,13 @@ func (s *Store) query(ctx context.Context, query Query) ([]map[string]string, er
 		return nil, fmt.Errorf("%w: %s", ErrProviderOutput, query.URI)
 	}
 	return rows, nil
+}
+
+func permissionDeniedText(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "permission denial") ||
+		strings.Contains(lower, "permission denied") ||
+		strings.Contains(lower, "securityexception")
 }
 
 func remoteClause(value string) (string, error) {
