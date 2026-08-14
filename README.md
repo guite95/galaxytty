@@ -23,10 +23,10 @@ Android application and does not call modem SMS APIs directly.
 - Samsung Messages (`com.samsung.android.messaging`)
 - Samsung Messages selected as the default SMS role holder for sending
 
-GalaxyTTY never runs `adb pair`, wakes or unlocks the main display, enters a
-PIN, changes the default SMS app, grants SMS permissions, or installs an APK.
-Pair or authorize the device and choose Samsung Messages as the default handler
-yourself before starting it.
+GalaxyTTY never runs `adb pair`, issues a main-display wake or unlock command,
+enters a PIN, changes the default SMS app, grants SMS permissions, or installs
+an APK. Pair or authorize the device and choose Samsung Messages as the default
+handler yourself before starting it.
 
 ## Real mode
 
