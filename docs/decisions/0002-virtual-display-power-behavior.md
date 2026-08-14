@@ -66,6 +66,10 @@ caller from reintroducing the behavior without an explicit design change.
   and after the virtual-display lifecycle.
 - Repository caller audit found the removed controller methods referenced only
   by their own unit tests.
+- On 2026-08-14, the gated SM-A376N virtual-display smoke passed with scrcpy
+  4.1 using the production intent-body arguments. It resolved a runtime logical
+  display ID, remained healthy, preserved the observed main-display state, and
+  stopped without a new temporary recording.
 
 ## Alternatives rejected
 
