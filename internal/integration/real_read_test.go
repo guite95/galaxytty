@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/galaxytty/galaxytty/internal/adb"
 	"github.com/galaxytty/galaxytty/internal/bootstrap"
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/doctor"
 	"github.com/galaxytty/galaxytty/internal/domain"
+	"github.com/galaxytty/galaxytty/internal/provider"
 )
 
 func TestRealGalaxyReadPath(t *testing.T) {
@@ -47,6 +49,29 @@ func TestRealGalaxyReadPath(t *testing.T) {
 	}
 	if _, err := runtime.Service.Poll(ctx, 0); err != nil {
 		t.Fatal(err)
+	}
+
+	client, err := adb.NewClient("", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := adb.Discover(ctx, client, adb.SelectionOptions{PreferUSB: cfg.Connection.PreferUSB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := provider.NewStore(target)
+	latestID, err := store.LatestMessageID(ctx)
+	if err != nil || latestID <= 0 {
+		t.Fatalf("latest SMS ID not resolved: id=%d err=%v", latestID, err)
+	}
+	incremental, err := store.MessagesAfter(ctx, latestID-1)
+	if err != nil || len(incremental) == 0 {
+		t.Fatalf("incremental SMS read failed: count=%d err=%v", len(incremental), err)
+	}
+	for _, message := range incremental {
+		if message.ID < latestID || message.Type != domain.MessageSMS {
+			t.Fatal("invalid incremental SMS mapping")
+		}
 	}
 	if err := runtime.Service.SendToAddress(ctx, "synthetic", "synthetic"); !errors.Is(err, domain.ErrSendingNotImplemented) {
 		t.Fatalf("send err=%v", err)
