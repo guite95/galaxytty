@@ -160,22 +160,36 @@ func TestRealSendUsesRuntimeAndPrintsPrivacySafePlainSuccess(t *testing.T) {
 	}
 }
 
-func TestRealSendJSONReturnsVerifiedIDs(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
-		return runtimeWithSender(fixedSender{result: domain.SendResult{MessageID: 12345, ThreadID: 49}}), nil
-	}}
-	var out bytes.Buffer
-	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "01012345678", "--text", "synthetic", "--json"}, deps); err != nil {
-		t.Fatal(err)
-	}
-	var response struct {
-		Success   bool  `json:"success"`
-		MessageID int64 `json:"message_id"`
-		ThreadID  int64 `json:"thread_id"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &response); err != nil || !response.Success || response.MessageID != 12345 || response.ThreadID != 49 {
-		t.Fatalf("response=%+v out=%q err=%v", response, out.String(), err)
+func TestRealSendJSONIncludesOnlyClassifiedTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		transport     domain.MessageType
+		wantTransport string
+	}{
+		{name: "unclassified transport is omitted"},
+		{name: "MMS transport is included", transport: domain.MessageMMS, wantTransport: "mms"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+				return runtimeWithSender(fixedSender{result: domain.SendResult{MessageID: 12345, ThreadID: 49, Transport: tc.transport}}), nil
+			}}
+			var out bytes.Buffer
+			if err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "01012345678", "--text", "synthetic", "--json"}, deps); err != nil {
+				t.Fatal(err)
+			}
+			var response map[string]any
+			if err := json.Unmarshal(out.Bytes(), &response); err != nil || response["success"] != true || response["message_id"] != float64(12345) || response["thread_id"] != float64(49) {
+				t.Fatalf("response=%+v out=%q err=%v", response, out.String(), err)
+			}
+			transport, present := response["transport"]
+			if tc.wantTransport == "" && present {
+				t.Fatalf("unclassified response contains transport=%v: %q", transport, out.String())
+			}
+			if tc.wantTransport != "" && transport != tc.wantTransport {
+				t.Fatalf("transport=%v; want %q: %q", transport, tc.wantTransport, out.String())
+			}
+		})
 	}
 }
 

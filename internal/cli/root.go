@@ -170,7 +170,7 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		if err != nil {
 			return err
 		}
-		response := sendResponse{Success: true, MessageID: result.MessageID, ThreadID: result.ThreadID}
+		response := sendResponse{Success: true, MessageID: result.MessageID, ThreadID: result.ThreadID, Transport: result.Transport}
 		if opts.json {
 			return json.NewEncoder(out).Encode(response)
 		}
@@ -221,9 +221,10 @@ func actionableRealError(err error) error {
 }
 
 type sendResponse struct {
-	Success   bool  `json:"success"`
-	MessageID int64 `json:"message_id"`
-	ThreadID  int64 `json:"thread_id"`
+	Success   bool               `json:"success"`
+	MessageID int64              `json:"message_id"`
+	ThreadID  int64              `json:"thread_id"`
+	Transport domain.MessageType `json:"transport,omitempty"`
 }
 
 func parseOptions(args []string) (options, error) {
