@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/bootstrap"
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/doctor"
@@ -79,12 +80,9 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 	if len(opts.command) > 0 {
 		command = opts.command[0]
 	}
-	if !opts.mock && command == "send" {
-		return domain.ErrSendingNotImplemented
-	}
 	if command == "doctor" {
 		if opts.mock {
-			fmt.Fprintln(out, "GalaxyTTY Doctor\n\n✓ mock adapters          ready\n✓ SMS Provider fixture   accessible\n✓ Virtual Display fake   supported\n\nConnection:\n  Mock\n\nReady.")
+			fmt.Fprintln(out, "GalaxyTTY Doctor\n\n✓ mock adapters          ready\n✓ SMS Provider fixture   accessible\n✓ Virtual Display fake   supported\n\nConnection:\n  Mock\n\nRead: ready\nSend: ready")
 			return nil
 		}
 		report := deps.doctor(ctx, cfg, opts.device)
@@ -165,7 +163,19 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		if err := flags.Parse(opts.command[1:]); err != nil {
 			return err
 		}
-		return service.SendToAddress(ctx, *to, *text)
+		if strings.TrimSpace(*to) == "" {
+			return fmt.Errorf("recipient is required")
+		}
+		result, err := service.SendToAddress(ctx, *to, *text)
+		if err != nil {
+			return err
+		}
+		response := sendResponse{Success: true, MessageID: result.MessageID, ThreadID: result.ThreadID}
+		if opts.json {
+			return json.NewEncoder(out).Encode(response)
+		}
+		fmt.Fprintln(out, "Message sent.")
+		return nil
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join(opts.command, " "))
 	}
@@ -193,9 +203,27 @@ func actionableRealError(err error) error {
 		return fmt.Errorf("%w. Run msg doctor and verify the device provider shape", err)
 	case errors.Is(err, domain.ErrWirelessDiscoveryUnavailable):
 		return fmt.Errorf("%w. Connect an already-paired target so it appears in adb devices -l", err)
+	case errors.Is(err, domain.ErrScrcpyNotFound):
+		return fmt.Errorf("%w. Install scrcpy 4.1 or newer and ensure it is on PATH", err)
+	case errors.Is(err, domain.ErrScrcpyStartup), errors.Is(err, domain.ErrVirtualDisplayIDNotFound), errors.Is(err, domain.ErrScrcpyExited):
+		return fmt.Errorf("%w. Run msg doctor and verify the selected Galaxy remains connected", err)
+	case errors.Is(err, domain.ErrClipboardRead), errors.Is(err, domain.ErrClipboardSet):
+		return fmt.Errorf("%w. Ensure macOS pbcopy and pbpaste are available", err)
+	case errors.Is(err, domain.ErrConversationOpen), errors.Is(err, domain.ErrComposerTap), errors.Is(err, domain.ErrClipboardPaste), errors.Is(err, domain.ErrSendTap):
+		return fmt.Errorf("%w. Verify Samsung Messages is enabled and retry", err)
+	case errors.Is(err, domain.ErrSendVerificationTimeout):
+		return fmt.Errorf("%w. The outgoing provider row was not verified; check Samsung Messages before retrying", err)
+	case errors.Is(err, app.ErrGroupSendUnsupported):
+		return fmt.Errorf("Group conversation sending is not supported yet: %w", err)
 	default:
 		return err
 	}
+}
+
+type sendResponse struct {
+	Success   bool  `json:"success"`
+	MessageID int64 `json:"message_id"`
+	ThreadID  int64 `json:"thread_id"`
 }
 
 func parseOptions(args []string) (options, error) {

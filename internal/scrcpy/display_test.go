@@ -37,3 +37,37 @@ func TestInspectRejectsMissingExecutableAndCommandFailure(t *testing.T) {
 		t.Fatal("expected version error")
 	}
 }
+
+func TestParseDisplayID(t *testing.T) {
+	tests := []struct {
+		name string
+		log  string
+		want int64
+	}{
+		{
+			name: "stdout prefix",
+			log:  "INFO: New display: 1080x1920/344 (id=18)",
+			want: 18,
+		},
+		{
+			name: "stderr prefix",
+			log:  "[server] INFO: New display: 1080x1920/344 (id=18)",
+			want: 18,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseDisplayID(tt.log)
+			if err != nil || got != tt.want {
+				t.Fatalf("ParseDisplayID() = %d, %v; want %d, nil", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseDisplayIDRejectsUnrelatedNumericID(t *testing.T) {
+	if _, err := ParseDisplayID("INFO: New display: previous session (id=7), size 1080x1920 (id=18)"); err == nil {
+		t.Fatal("ParseDisplayID() error = nil; want error for an unrelated ID")
+	}
+}

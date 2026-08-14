@@ -65,10 +65,10 @@ func (b *Backend) LatestMessageID(context.Context) (int64, error) {
 	}
 	return id, nil
 }
-func (b *Backend) Send(_ context.Context, phone, text string) error {
+func (b *Backend) Send(_ context.Context, phone, text string) (domain.SendResult, error) {
 	normalizedPhone := domain.NormalizePhone(phone)
 	if normalizedPhone == "" || text == "" {
-		return fmt.Errorf("phone and text are required")
+		return domain.SendResult{}, fmt.Errorf("phone and text are required")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -85,13 +85,13 @@ func (b *Backend) Send(_ context.Context, phone, text string) error {
 		}
 	}
 	if threadID == 0 {
-		return fmt.Errorf("mock conversation for phone not found")
+		return domain.SendResult{}, fmt.Errorf("mock conversation for phone not found")
 	}
 	m := domain.Message{ID: b.nextID, ThreadID: threadID, Address: phone, Body: text, Timestamp: time.Now(), Direction: domain.DirectionOutgoing, Read: true, Type: domain.MessageSMS}
 	b.nextID++
 	b.MessagesData = append(b.MessagesData, m)
 	b.Sent = append(b.Sent, m)
-	return nil
+	return domain.SendResult{MessageID: m.ID, ThreadID: m.ThreadID}, nil
 }
 func (b *Backend) SimulateIncoming(thread int64, text string) {
 	b.mu.Lock()
@@ -116,8 +116,9 @@ func (d *Display) Start(context.Context) (domain.VirtualDisplay, error) {
 	d.Started = true
 	return domain.VirtualDisplay{AndroidDisplayID: 18, Width: 1080, Height: 1920}, nil
 }
-func (d *Display) Stop(context.Context) error   { d.Started = false; d.Stops++; return nil }
-func (d *Display) Healthy(context.Context) bool { return d.Started }
+func (d *Display) SyncClipboard(context.Context) error { return nil }
+func (d *Display) Stop(context.Context) error          { d.Started = false; d.Stops++; return nil }
+func (d *Display) Healthy(context.Context) bool        { return d.Started }
 
 type Notifier struct {
 	Items  []domain.Notification

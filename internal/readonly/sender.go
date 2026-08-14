@@ -8,8 +8,8 @@ import (
 
 type Sender struct{}
 
-func (Sender) Send(context.Context, string, string) error {
-	return domain.ErrSendingNotImplemented
+func (Sender) Send(context.Context, string, string) (domain.SendResult, error) {
+	return domain.SendResult{}, domain.ErrSendingNotImplemented
 }
 
 type Notifier struct{}

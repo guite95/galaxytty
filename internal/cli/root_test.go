@@ -11,10 +11,12 @@ import (
 	"testing"
 
 	"github.com/galaxytty/galaxytty/internal/adb"
+	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/bootstrap"
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/doctor"
 	"github.com/galaxytty/galaxytty/internal/domain"
+	"github.com/galaxytty/galaxytty/internal/mock"
 )
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -36,8 +38,20 @@ func TestMockCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestMockDoctorReportsReadAndSendReady(t *testing.T) {
+	output, err := run(t, "doctor", "--mock")
+	if err != nil || !strings.Contains(output, "Read: ready") || !strings.Contains(output, "Send: ready") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
 func TestJSONOnly(t *testing.T) {
-	for _, a := range [][]string{{"conversations", "--mock", "--json"}, {"unread", "--mock", "--json"}, {"messages", "1", "--mock", "--json"}} {
+	for _, a := range [][]string{
+		{"conversations", "--mock", "--json"},
+		{"unread", "--mock", "--json"},
+		{"messages", "1", "--mock", "--json"},
+		{"send", "--mock", "--to", "01012345678", "--text", "synthetic", "--json"},
+	} {
 		v, e := run(t, a...)
 		if e != nil || !json.Valid([]byte(v)) {
 			t.Fatalf("%v: %q %v", a, v, e)
@@ -115,17 +129,77 @@ func TestRealReadCommandsAndJSON(t *testing.T) {
 	}
 }
 
-func TestRealSendRejectsBeforeRuntimeConstruction(t *testing.T) {
+type fixedSender struct {
+	result domain.SendResult
+	err    error
+}
+
+func (s fixedSender) Send(context.Context, string, string) (domain.SendResult, error) {
+	return s.result, s.err
+}
+
+func runtimeWithSender(sender domain.MessageSender) *bootstrap.Runtime {
+	backend := mock.New()
+	return &bootstrap.Runtime{Service: app.NewService(backend, sender, nil, nil, app.NotificationPolicy{}, domain.ApplicationStatus{Label: "USB"})}
+}
+
+func TestRealSendUsesRuntimeAndPrintsPrivacySafePlainSuccess(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	called := false
 	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
 		called = true
-		return nil, errors.New("must not construct runtime")
+		return runtimeWithSender(fixedSender{result: domain.SendResult{MessageID: 12345, ThreadID: 49}}), nil
 	}}
 	var out bytes.Buffer
-	err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "synthetic", "--text", "synthetic"}, deps)
-	if !errors.Is(err, domain.ErrSendingNotImplemented) || called {
-		t.Fatalf("err=%v called=%v", err, called)
+	err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "01012345678", "--text", "private body"}, deps)
+	if err != nil || !called || strings.TrimSpace(out.String()) != "Message sent." {
+		t.Fatalf("out=%q err=%v called=%v", out.String(), err, called)
+	}
+	if strings.Contains(out.String(), "01012345678") || strings.Contains(out.String(), "private body") {
+		t.Fatalf("send output leaked private values: %q", out.String())
+	}
+}
+
+func TestRealSendJSONReturnsVerifiedIDs(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+		return runtimeWithSender(fixedSender{result: domain.SendResult{MessageID: 12345, ThreadID: 49}}), nil
+	}}
+	var out bytes.Buffer
+	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "01012345678", "--text", "synthetic", "--json"}, deps); err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Success   bool  `json:"success"`
+		MessageID int64 `json:"message_id"`
+		ThreadID  int64 `json:"thread_id"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil || !response.Success || response.MessageID != 12345 || response.ThreadID != 49 {
+		t.Fatalf("response=%+v out=%q err=%v", response, out.String(), err)
+	}
+}
+
+func TestRealSendErrorsAreActionableAndLeaveJSONStdoutEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"scrcpy", domain.ErrScrcpyNotFound, "Install scrcpy"},
+		{"clipboard", domain.ErrClipboardRead, "pbcopy and pbpaste"},
+		{"verification", domain.ErrSendVerificationTimeout, "not verified"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+				return runtimeWithSender(fixedSender{err: tc.err}), nil
+			}}
+			var out bytes.Buffer
+			err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "01012345678", "--text", "synthetic", "--json"}, deps)
+			if !errors.Is(err, tc.err) || !strings.Contains(err.Error(), tc.want) || out.Len() != 0 {
+				t.Fatalf("out=%q err=%v", out.String(), err)
+			}
+		})
 	}
 }
 
@@ -137,17 +211,31 @@ func TestDoctorFormatsStructuredChecks(t *testing.T) {
 				{Name: "adb", Detail: "/synthetic/adb", State: doctor.Pass},
 				{Name: "RCS", Detail: "deferred", State: doctor.Info},
 			},
-			Ready: true, Summary: "Read mode ready. Sending not implemented yet.",
+			Ready: true, ReadReady: true, SendReady: true, Summary: "Read: ready\nSend: ready",
 		}
 	}}
 	var out bytes.Buffer
 	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor"}, deps); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"GalaxyTTY Doctor", "✓ adb", "○ RCS", "Read mode ready"} {
+	for _, want := range []string{"GalaxyTTY Doctor", "✓ adb", "○ RCS", "Read: ready", "Send: ready"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %q", want, out.String())
 		}
+	}
+}
+
+func TestDoctorDoesNotFailReadModeWhenOnlySendIsNotReady(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{doctor: func(context.Context, config.Config, string) doctor.Report {
+		return doctor.Report{Ready: true, ReadReady: true, SendReady: false, Summary: "Read: ready\nSend: not ready"}
+	}}
+	var out bytes.Buffer
+	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor"}, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Send: not ready") {
+		t.Fatalf("out=%q", out.String())
 	}
 }
 

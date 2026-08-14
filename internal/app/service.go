@@ -19,8 +19,8 @@ type API interface {
 	Conversations(context.Context) ([]domain.Conversation, error)
 	Unread(context.Context) ([]domain.Conversation, error)
 	Messages(context.Context, int64, domain.MessageQuery) ([]domain.Message, error)
-	SendToConversation(context.Context, int64, string) error
-	SendToAddress(context.Context, string, string) error
+	SendToConversation(context.Context, int64, string) (domain.SendResult, error)
+	SendToAddress(context.Context, string, string) (domain.SendResult, error)
 	InitializePolling(context.Context) error
 	Poll(context.Context, int64) ([]domain.Message, error)
 	Status(context.Context) domain.ApplicationStatus
@@ -67,27 +67,27 @@ func (s *Service) Unread(ctx context.Context) ([]domain.Conversation, error) {
 func (s *Service) Messages(ctx context.Context, id int64, q domain.MessageQuery) ([]domain.Message, error) {
 	return s.store.Messages(ctx, id, q)
 }
-func (s *Service) SendToAddress(ctx context.Context, phone, text string) error {
+func (s *Service) SendToAddress(ctx context.Context, phone, text string) (domain.SendResult, error) {
 	if strings.TrimSpace(text) == "" {
-		return errors.New("message text is required")
+		return domain.SendResult{}, errors.New("message text is required")
 	}
 	return s.sender.Send(ctx, phone, text)
 }
-func (s *Service) SendToConversation(ctx context.Context, id int64, text string) error {
+func (s *Service) SendToConversation(ctx context.Context, id int64, text string) (domain.SendResult, error) {
 	cs, e := s.Conversations(ctx)
 	if e != nil {
-		return e
+		return domain.SendResult{}, e
 	}
 	for _, c := range cs {
 		if c.ThreadID != id {
 			continue
 		}
 		if len(c.Participants) != 1 {
-			return ErrGroupSendUnsupported
+			return domain.SendResult{}, ErrGroupSendUnsupported
 		}
 		return s.SendToAddress(ctx, c.Participants[0].Phone, text)
 	}
-	return ErrConversationNotFound
+	return domain.SendResult{}, ErrConversationNotFound
 }
 func (s *Service) InitializePolling(ctx context.Context) error {
 	s.mu.Lock()

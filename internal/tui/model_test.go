@@ -65,10 +65,84 @@ func TestComposerSend(t *testing.T) {
 	m = open(t, m)
 	m = typeText(m, "hello")
 	u, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := u.(Model); !got.sending || got.status != "Sending…" {
+		t.Fatalf("sending=%t status=%q", got.sending, got.status)
+	}
 	msg := cmd()
-	u, _ = u.(Model).Update(msg)
+	u, refresh := u.(Model).Update(msg)
 	if len(b.Sent) != 1 || b.Sent[0].Address != "01012345678" {
 		t.Fatal(b.Sent)
+	}
+	got := u.(Model)
+	if got.sending || got.composer.Value() != "" || got.errorText != "" {
+		t.Fatalf("sending=%t composer=%q error=%q", got.sending, got.composer.Value(), got.errorText)
+	}
+	refreshMsg := refresh()
+	batch, ok := refreshMsg.(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("refresh=%T %#v", refreshMsg, refreshMsg)
+	}
+	foundConversations, foundMessages := false, false
+	for _, command := range batch {
+		switch command().(type) {
+		case conversationsMsg:
+			foundConversations = true
+		case messagesMsg:
+			foundMessages = true
+		}
+	}
+	if !foundConversations || !foundMessages {
+		t.Fatalf("conversation refresh=%t message refresh=%t", foundConversations, foundMessages)
+	}
+}
+
+func TestDuplicateEnterAndComposerChangesAreSuppressedWhileSending(t *testing.T) {
+	m, _ := fixture(t)
+	m = open(t, m)
+	m = typeText(m, "hello")
+	updated, send := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if send == nil || !m.sending {
+		t.Fatal("send did not start")
+	}
+	updated, duplicate := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if duplicate != nil || updated.(Model).composer.Value() != "hello" {
+		t.Fatalf("duplicate=%v composer=%q", duplicate, updated.(Model).composer.Value())
+	}
+	updated, typed := updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if typed != nil || updated.(Model).composer.Value() != "hello" {
+		t.Fatalf("typed=%v composer=%q", typed, updated.(Model).composer.Value())
+	}
+}
+
+func TestSendingStatusSurvivesBackgroundRefresh(t *testing.T) {
+	m, backend := fixture(t)
+	m = open(t, m)
+	m = typeText(m, "hello")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	updated, _ = m.Update(pollMsg{})
+	m = updated.(Model)
+	if m.status != "Sending…" {
+		t.Fatalf("status after poll=%q", m.status)
+	}
+	updated, _ = m.Update(conversationsMsg{items: backend.ConversationsData})
+	if got := updated.(Model).status; got != "Sending…" {
+		t.Fatalf("status after conversations=%q", got)
+	}
+}
+
+func TestGroupSendFailureKeepsComposerAndClearsSending(t *testing.T) {
+	m, backend := fixture(t)
+	backend.ConversationsData[0].Participants = append(backend.ConversationsData[0].Participants, domain.Contact{Phone: "01000000000"})
+	m.conversations[0].Participants = append(m.conversations[0].Participants, domain.Contact{Phone: "01000000000"})
+	m = open(t, m)
+	m = typeText(m, "group text")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = updated.(Model).Update(cmd())
+	got := updated.(Model)
+	if got.sending || got.composer.Value() != "group text" || got.errorText != "Group conversation sending is not supported yet." {
+		t.Fatalf("sending=%t composer=%q error=%q", got.sending, got.composer.Value(), got.errorText)
 	}
 }
 func TestSlashCommands(t *testing.T) {
@@ -228,9 +302,12 @@ func TestReadOnlySendKeepsComposerAndShowsUnavailable(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("missing send command")
 	}
+	if !updated.(Model).sending {
+		t.Fatal("send state did not start")
+	}
 	updated, _ = updated.(Model).Update(cmd())
 	got := updated.(Model)
-	if got.composer.Value() != "synthetic hello" || got.errorText != "Sending is not available yet." {
-		t.Fatalf("composer=%q error=%q", got.composer.Value(), got.errorText)
+	if got.sending || got.composer.Value() != "synthetic hello" || got.errorText != "Sending is not available yet." {
+		t.Fatalf("sending=%t composer=%q error=%q", got.sending, got.composer.Value(), got.errorText)
 	}
 }

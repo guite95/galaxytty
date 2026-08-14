@@ -22,19 +22,27 @@ func TestSendToConversationResolvesParticipant(t *testing.T) {
 		id    int64
 		phone string
 	}{{1, "01012345678"}, {2, "01098765432"}} {
-		if e := s.SendToConversation(context.Background(), tc.id, "hello"); e != nil {
+		result, e := s.SendToConversation(context.Background(), tc.id, "hello")
+		if e != nil {
 			t.Fatal(e)
 		}
 		if got := b.Sent[len(b.Sent)-1].Address; got != tc.phone {
 			t.Fatalf("thread %d: %s", tc.id, got)
+		}
+		if result.MessageID != b.Sent[len(b.Sent)-1].ID || result.ThreadID != tc.id {
+			t.Fatalf("thread %d result=%+v", tc.id, result)
 		}
 	}
 }
 func TestGroupSendUnsupported(t *testing.T) {
 	s, b, _ := serviceFixture(NotificationPolicy{})
 	b.ConversationsData[0].Participants = append(b.ConversationsData[0].Participants, domain.Contact{Phone: "01000000000"})
-	if e := s.SendToConversation(context.Background(), 1, "hello"); !errors.Is(e, ErrGroupSendUnsupported) {
+	before := len(b.Sent)
+	if _, e := s.SendToConversation(context.Background(), 1, "hello"); !errors.Is(e, ErrGroupSendUnsupported) {
 		t.Fatal(e)
+	}
+	if len(b.Sent) != before {
+		t.Fatal("group rejection called sender")
 	}
 }
 func TestPollingAndNotificationPolicy(t *testing.T) {
