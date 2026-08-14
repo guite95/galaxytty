@@ -271,7 +271,6 @@ func TestRealSamsungMMSTextSend(t *testing.T) {
 type smsExtensionSnapshot struct {
 	supported map[string]bool
 	nonEmpty  map[string]bool
-	values    map[string]string
 }
 
 type shellQuery func(context.Context, ...string) ([]byte, error)
@@ -360,7 +359,7 @@ func findRCSProviderCorrelation(rows []map[string]string, baseline int64, recipi
 }
 
 func newSMSExtensionSnapshot() smsExtensionSnapshot {
-	return smsExtensionSnapshot{supported: map[string]bool{}, nonEmpty: map[string]bool{}, values: map[string]string{}}
+	return smsExtensionSnapshot{supported: map[string]bool{}, nonEmpty: map[string]bool{}}
 }
 
 func (s smsExtensionSnapshot) counts() (supported, nonEmpty int) {
@@ -397,7 +396,6 @@ func observeSMSExtensions(ctx context.Context, shell shellQuery, messageID int64
 		}
 		snapshot.supported[field] = true
 		value := strings.TrimSpace(rows[0][field])
-		snapshot.values[field] = value
 		snapshot.nonEmpty[field] = value != "" && !strings.EqualFold(value, "null")
 	}
 	return snapshot
