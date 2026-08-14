@@ -32,13 +32,15 @@ type SenderConfig struct {
 	SendSettleDelay        time.Duration
 	VerificationTimeout    time.Duration
 	VerificationInterval   time.Duration
-	// UseIntentBody supports virtual displays whose app cannot consume the global clipboard.
-	UseIntentBody bool
+	InputMode              domain.TextInputMode
 }
 
 func (c SenderConfig) validate() error {
 	if c.ConversationReadyDelay <= 0 || c.ClipboardSyncDelay <= 0 || c.SendSettleDelay <= 0 || c.VerificationTimeout <= 0 || c.VerificationInterval <= 0 {
 		return fmt.Errorf("invalid Samsung sender timing configuration")
+	}
+	if !c.InputMode.Valid() {
+		return fmt.Errorf("invalid Samsung text input mode")
 	}
 	return nil
 }
@@ -110,7 +112,7 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 			return domain.SendResult{}, s.controllerError(err)
 		}
 	}
-	if s.config.UseIntentBody {
+	if s.config.InputMode == domain.TextInputIntentBody {
 		if err := s.controller.OpenConversationWithBody(ctx, display, normalizedPhone, text); err != nil {
 			return domain.SendResult{}, s.controllerError(err)
 		}

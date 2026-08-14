@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/galaxytty/galaxytty/internal/domain"
 )
 
 func write(t *testing.T, s string) string {
@@ -23,16 +25,19 @@ func TestDefaultsAndMissing(t *testing.T) {
 	if c.Samsung.ClipboardSyncDelay.Duration != 300*time.Millisecond || c.Samsung.SendSettleDelay.Duration != 500*time.Millisecond || c.Samsung.VerificationTimeout.Duration != 10*time.Second {
 		t.Fatalf("Samsung timings=%+v", c.Samsung)
 	}
+	if c.Samsung.TextInputMode != domain.TextInputIntentBody {
+		t.Fatalf("text input mode=%q", c.Samsung.TextInputMode)
+	}
 }
 func TestValidTOML(t *testing.T) {
-	p := write(t, "[connection]\nprefer_usb=false\n[polling]\ninterval='2s'\n[notifications]\nenabled=false\nshow_when_focused=true\n[samsung]\ndisplay_width=720\ndisplay_height=1280\nclipboard_sync_delay='450ms'\nsend_settle_delay='250ms'\nverification_timeout='12s'\n[samsung.layout]\ncomposer_x=1\ncomposer_y=2\nsend_x=3\nsend_y=4\n")
+	p := write(t, "[connection]\nprefer_usb=false\n[polling]\ninterval='2s'\n[notifications]\nenabled=false\nshow_when_focused=true\n[samsung]\ntext_input_mode='clipboard'\ndisplay_width=720\ndisplay_height=1280\nclipboard_sync_delay='450ms'\nsend_settle_delay='250ms'\nverification_timeout='12s'\n[samsung.layout]\ncomposer_x=1\ncomposer_y=2\nsend_x=3\nsend_y=4\n")
 	c, e := Load(p)
-	if e != nil || c.Connection.PreferUSB || c.Polling.Interval.Duration != 2*time.Second || c.Samsung.Layout.SendY != 4 || c.Samsung.ClipboardSyncDelay.Duration != 450*time.Millisecond || c.Samsung.VerificationTimeout.Duration != 12*time.Second {
+	if e != nil || c.Connection.PreferUSB || c.Polling.Interval.Duration != 2*time.Second || c.Samsung.Layout.SendY != 4 || c.Samsung.ClipboardSyncDelay.Duration != 450*time.Millisecond || c.Samsung.VerificationTimeout.Duration != 12*time.Second || c.Samsung.TextInputMode != domain.TextInputClipboard {
 		t.Fatal(c, e)
 	}
 }
 func TestInvalidConfig(t *testing.T) {
-	for _, s := range []string{"[broken", "[polling]\ninterval='never'", "[connection]\nprefer_usb='yes'", "[samsung]\ndisplay_width='wide'", "unknown=1"} {
+	for _, s := range []string{"[broken", "[polling]\ninterval='never'", "[connection]\nprefer_usb='yes'", "[samsung]\ndisplay_width='wide'", "[samsung]\ntext_input_mode='magic'", "unknown=1"} {
 		if _, e := Load(write(t, s)); e == nil {
 			t.Fatalf("expected error for %q", s)
 		}

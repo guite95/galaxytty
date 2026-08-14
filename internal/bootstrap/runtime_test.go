@@ -118,8 +118,12 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 	display := &lazyDisplay{}
 	backend := &syntheticADB{}
 	cfg := config.Default()
+	var displayConfig scrcpy.Config
 	runtime, err := realWithDependencies(context.Background(), cfg, "", backend, realDependencies{
-		newDisplay:   func(scrcpy.Config) (domain.VirtualDisplayManager, error) { return display, nil },
+		newDisplay: func(got scrcpy.Config) (domain.VirtualDisplayManager, error) {
+			displayConfig = got
+			return display, nil
+		},
 		newClipboard: func() domain.Clipboard { return &runtimeClipboard{value: "old"} },
 		senderTimings: func(config.Config) samsung.SenderConfig {
 			return samsung.SenderConfig{
@@ -128,7 +132,7 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 				SendSettleDelay:        time.Nanosecond,
 				VerificationTimeout:    time.Second,
 				VerificationInterval:   time.Millisecond,
-				UseIntentBody:          true,
+				InputMode:              domain.TextInputIntentBody,
 			}
 		},
 	})
@@ -137,6 +141,9 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 	}
 	if display.starts != 0 {
 		t.Fatal("real runtime eagerly started scrcpy display")
+	}
+	if displayConfig.InputMode != domain.TextInputIntentBody {
+		t.Fatalf("display input mode=%q", displayConfig.InputMode)
 	}
 	status := runtime.Service.Status(context.Background())
 	if status.Label != "USB" || status.Connection != domain.ConnectionUSB {

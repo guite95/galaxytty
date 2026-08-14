@@ -20,6 +20,17 @@ const (
 	MessageRCS MessageType = "rcs"
 )
 
+type TextInputMode string
+
+const (
+	TextInputIntentBody TextInputMode = "intent_body"
+	TextInputClipboard  TextInputMode = "clipboard"
+)
+
+func (m TextInputMode) Valid() bool {
+	return m == TextInputIntentBody || m == TextInputClipboard
+}
+
 type Attachment struct {
 	ID, MIMEType, Name, URI string
 	Size                    int64

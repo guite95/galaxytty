@@ -15,30 +15,51 @@ import (
 	"github.com/galaxytty/galaxytty/internal/domain"
 )
 
-func TestBuildArgs(t *testing.T) {
-	cfg := Config{
-		Target:  "synthetic-target",
-		Package: "com.samsung.android.messaging",
-		Width:   1080,
-		Height:  1920,
-	}
-
-	got := BuildArgs(cfg, "/synthetic/record.mp4")
-	want := []string{
-		"-s", "synthetic-target",
-		"--new-display=1080x1920",
-		"--display-ime-policy=local",
-		"--start-app=com.samsung.android.messaging",
-		"--record=/synthetic/record.mp4",
-		"--no-audio",
-		"--keep-active",
-		"--window-title=GalaxyTTY-record.mp4",
-		"--window-width=1",
-		"--window-height=1",
-		"--window-borderless",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("BuildArgs() = %#v; want %#v", got, want)
+func TestBuildArgsSeparatesIntentAndClipboardModes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode domain.TextInputMode
+		want []string
+	}{
+		{
+			name: "intent body headless",
+			mode: domain.TextInputIntentBody,
+			want: []string{
+				"-s", "synthetic-target",
+				"--new-display=1080x1920",
+				"--display-ime-policy=local",
+				"--start-app=com.samsung.android.messaging",
+				"--record=/synthetic/record.mp4",
+				"--no-audio",
+				"--no-video-playback",
+			},
+		},
+		{
+			name: "clipboard compatibility window",
+			mode: domain.TextInputClipboard,
+			want: []string{
+				"-s", "synthetic-target",
+				"--new-display=1080x1920",
+				"--display-ime-policy=local",
+				"--start-app=com.samsung.android.messaging",
+				"--record=/synthetic/record.mp4",
+				"--no-audio",
+				"--window-title=GalaxyTTY-record.mp4",
+				"--window-width=1",
+				"--window-height=1",
+				"--window-borderless",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{
+				Target: "synthetic-target", Package: "com.samsung.android.messaging",
+				Width: 1080, Height: 1920, InputMode: tc.mode,
+			}
+			if got := BuildArgs(cfg, "/synthetic/record.mp4"); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("BuildArgs() = %#v; want %#v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -65,6 +86,9 @@ func TestNewManagerDefersExecutableLookup(t *testing.T) {
 	})
 	if err != nil || manager == nil {
 		t.Fatalf("NewManager() = %v, %v; want manager without executable lookup", manager, err)
+	}
+	if manager.config.InputMode != domain.TextInputIntentBody {
+		t.Fatalf("default input mode=%q", manager.config.InputMode)
 	}
 }
 

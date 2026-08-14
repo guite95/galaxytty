@@ -89,7 +89,7 @@ func (d realDependencies) withDefaults() realDependencies {
 				SendSettleDelay:        cfg.Samsung.SendSettleDelay.Duration,
 				VerificationTimeout:    cfg.Samsung.VerificationTimeout.Duration,
 				VerificationInterval:   verificationInterval,
-				UseIntentBody:          true,
+				InputMode:              cfg.Samsung.TextInputMode,
 			}
 		}
 	}
@@ -125,6 +125,7 @@ func realWithDependencies(ctx context.Context, cfg config.Config, selector strin
 		Target: target.Info().Serial, Package: samsungMessagesPackage,
 		Width: cfg.Samsung.DisplayWidth, Height: cfg.Samsung.DisplayHeight,
 		StartupTimeout: scrcpyStartupTimeout,
+		InputMode:      cfg.Samsung.TextInputMode,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure virtual display: %w", err)

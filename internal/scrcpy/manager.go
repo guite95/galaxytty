@@ -20,6 +20,7 @@ type Config struct {
 	Path, Target, Package string
 	Width, Height         int
 	StartupTimeout        time.Duration
+	InputMode             domain.TextInputMode
 }
 
 type Manager struct {
@@ -73,23 +74,30 @@ func (p *commandProcess) Signal(signal os.Signal) error { return p.cmd.Process.S
 func (p *commandProcess) Kill() error                   { return p.cmd.Process.Kill() }
 
 func BuildArgs(cfg Config, recordPath string) []string {
-	return []string{
+	args := []string{
 		"-s", cfg.Target,
 		fmt.Sprintf("--new-display=%dx%d", cfg.Width, cfg.Height),
 		"--display-ime-policy=local",
 		"--start-app=" + cfg.Package,
 		"--record=" + recordPath,
 		"--no-audio",
-		"--keep-active",
-		"--window-title=GalaxyTTY-" + filepath.Base(recordPath),
-		"--window-width=1",
-		"--window-height=1",
-		"--window-borderless",
 	}
+	if cfg.InputMode == domain.TextInputClipboard {
+		return append(args,
+			"--window-title=GalaxyTTY-"+filepath.Base(recordPath),
+			"--window-width=1",
+			"--window-height=1",
+			"--window-borderless",
+		)
+	}
+	return append(args, "--no-video-playback")
 }
 
 func NewManager(cfg Config) (*Manager, error) {
-	if cfg.Target == "" || cfg.Package == "" || cfg.Width <= 0 || cfg.Height <= 0 || cfg.StartupTimeout <= 0 {
+	if cfg.InputMode == "" {
+		cfg.InputMode = domain.TextInputIntentBody
+	}
+	if cfg.Target == "" || cfg.Package == "" || cfg.Width <= 0 || cfg.Height <= 0 || cfg.StartupTimeout <= 0 || !cfg.InputMode.Valid() {
 		return nil, fmt.Errorf("invalid scrcpy manager configuration")
 	}
 	if cfg.Path == "" {

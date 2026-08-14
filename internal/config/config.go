@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -32,11 +33,12 @@ type Config struct {
 		ShowWhenFocused bool `toml:"show_when_focused"`
 	} `toml:"notifications"`
 	Samsung struct {
-		DisplayWidth        int      `toml:"display_width"`
-		DisplayHeight       int      `toml:"display_height"`
-		ClipboardSyncDelay  Duration `toml:"clipboard_sync_delay"`
-		SendSettleDelay     Duration `toml:"send_settle_delay"`
-		VerificationTimeout Duration `toml:"verification_timeout"`
+		TextInputMode       domain.TextInputMode `toml:"text_input_mode"`
+		DisplayWidth        int                  `toml:"display_width"`
+		DisplayHeight       int                  `toml:"display_height"`
+		ClipboardSyncDelay  Duration             `toml:"clipboard_sync_delay"`
+		SendSettleDelay     Duration             `toml:"send_settle_delay"`
+		VerificationTimeout Duration             `toml:"verification_timeout"`
 		Layout              struct {
 			ComposerX int `toml:"composer_x"`
 			ComposerY int `toml:"composer_y"`
@@ -51,6 +53,7 @@ func Default() Config {
 	c.Connection.PreferUSB = true
 	c.Polling.Interval.Duration = time.Second
 	c.Notifications.Enabled = true
+	c.Samsung.TextInputMode = domain.TextInputIntentBody
 	c.Samsung.DisplayWidth = 1080
 	c.Samsung.DisplayHeight = 1920
 	c.Samsung.ClipboardSyncDelay.Duration = 300 * time.Millisecond
@@ -93,6 +96,9 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if !c.Samsung.TextInputMode.Valid() {
+		return fmt.Errorf("Samsung text input mode must be intent_body or clipboard")
+	}
 	if c.Samsung.DisplayWidth <= 0 || c.Samsung.DisplayHeight <= 0 {
 		return fmt.Errorf("Samsung display dimensions must be positive")
 	}

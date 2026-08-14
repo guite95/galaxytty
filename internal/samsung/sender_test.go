@@ -150,6 +150,7 @@ func senderFixture(t *testing.T) (*Sender, *[]string, *senderDisplay, *senderCon
 		SendSettleDelay:        3 * time.Millisecond,
 		VerificationTimeout:    50 * time.Millisecond,
 		VerificationInterval:   time.Millisecond,
+		InputMode:              domain.TextInputClipboard,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +193,7 @@ func TestSenderRunsVerifiedSequenceAndRestoresClipboard(t *testing.T) {
 
 func TestSenderUsesVerifiedIntentBodyCompatibilityPath(t *testing.T) {
 	sender, calls, _, _, _, _ := senderFixture(t)
-	sender.config.UseIntentBody = true
+	sender.config.InputMode = domain.TextInputIntentBody
 	result, err := sender.Send(context.Background(), "+82 10-1234-5678", "안녕하세요 😀")
 	if err != nil {
 		t.Fatal(err)
