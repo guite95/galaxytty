@@ -37,15 +37,28 @@ side effect and no current production caller requires them. Read-only
 `dumpsys trust`, `dumpsys window policy`, and `dumpsys power` checks remain in
 gated integration tests to detect regressions.
 
-CONCLUSION: remove the unused mutation capability and retain only read-only
-state observation.
+The first actual Phase 3-C SMS regression later reached the send/verification
+path after successful virtual-display startup, Samsung Messages role checks,
+and provider baseline capture. Verification timed out. No SMS row newer than
+the baseline matched the diagnostic attempt, no matching MMS text evidence was
+found, Samsung Messages showed no outgoing message from the attempt, and no
+persistent draft was visible.
+
+CURRENT OBSERVATION: successful virtual-display startup alone does not prove
+that Samsung Messages has a focused, input-capable window on that display.
+
+CONCLUSION: the explicit Android wake/sleep mutation remains rejected, but the
+assumption that production interaction is reliable without `--keep-active` is
+not yet validated. Compare the current arguments against an otherwise
+identical `--keep-active` variant without tapping Send before selecting a
+production change.
 
 ## Decision
 
-Production scrcpy arguments omit `--keep-active`. The Samsung controller does
-not expose methods for waking the virtual display, sleeping display 0, or
-querying display power as part of a send. The sender never injects key codes
-224 or 223.
+Production scrcpy arguments continue to omit `--keep-active` while the
+non-sending A/B diagnostic is pending. The Samsung controller does not expose
+methods for waking the virtual display, sleeping display 0, or querying
+display power as part of a send. The sender never injects key codes 224 or 223.
 
 The integration tests may read main-display lock and power state before and
 after a gated display/send run. They do not mutate that state.
@@ -70,6 +83,10 @@ caller from reintroducing the behavior without an explicit design change.
   4.1 using the production intent-body arguments. It resolved a runtime logical
   display ID, remained healthy, preserved the observed main-display state, and
   stopped without a new temporary recording.
+- The first actual Phase 3-C SMS regression performed one send action and did
+  not retry. Its exact SMS verification timed out, and subsequent read-only SMS,
+  MMS, Samsung Messages, and draft observations found no evidence that the
+  diagnostic message had been created or sent.
 
 ## Alternatives rejected
 
@@ -82,9 +99,10 @@ caller from reintroducing the behavior without an explicit design change.
 
 ## Revisit condition
 
-Revisit only if a gated regression on the reference device proves that
-Samsung Messages cannot be controlled without a power action. Any
-reintroduction must record pre-send and current lock/power state, avoid sleeping
-an unlocked user session, and include a regression test for the exact minimal
-mutation required. Re-run the decision after Android, One UI, Samsung Messages,
-or scrcpy updates.
+Complete the gated current-versus-`--keep-active` composer diagnostic on the
+reference device. Restore `--keep-active` only if the single-variable comparison
+shows a reproducible display, activity, focus, or composer-readiness difference.
+Any explicit Android power reintroduction must separately record pre-send and
+current lock/power state, avoid sleeping an unlocked user session, and include a
+regression test for the exact minimal mutation required. Re-run the decision
+after Android, One UI, Samsung Messages, or scrcpy updates.

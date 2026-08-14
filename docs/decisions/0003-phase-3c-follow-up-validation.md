@@ -40,19 +40,43 @@ accessible, scrcpy 4.1, `intent_body`, a 1080x1920 layout, and both Read and
 Send ready. Candidate RCS extension visibility remained partial and its mapping
 unsupported.
 
-CURRENT OBSERVATION: none of the SMS, RCS, or MMS enable-and-recipient gate
-pairs was set in the process environment. No real message was sent.
+CURRENT OBSERVATION FOR THE ORIGINAL FOLLOW-UP: none of the SMS, RCS, or MMS
+enable-and-recipient gate pairs was set in the process environment. No real
+message was attempted during that run.
 
-CONCLUSION: record READ and virtual-display lifecycle as PASS, and record all
-three actual-send regressions as SKIP rather than reusing contacts, history, or
-another transport's recipient.
+A later explicitly gated Phase 3-C SMS regression performed one send action and
+did not retry. The virtual display started, Samsung Messages held the default
+SMS role, readiness and provider baseline checks passed, and the sender reached
+the send/verification path. Verification timed out. Read-only follow-up found
+no matching SMS row newer than the baseline, no matching MMS text part, no
+outgoing message visible in Samsung Messages, and no persistent draft from the
+attempt.
+
+Immediately before that regression, one provider baseline query timed out near
+the five-second ADB command limit. Subsequent read-only SMS queries covering all
+rows and the supported history types completed in approximately 1.3 to 1.7
+seconds, and doctor again reported Read and Send ready. This is recorded as a
+transient observation, not as evidence for automatic retries or a global
+timeout increase.
+
+CURRENT OBSERVATION: the changed Phase 3-C production send path is not yet
+validated. A successful display lifecycle smoke does not establish that the
+Samsung Messages composer owns a focused, input-capable window on the runtime
+virtual display.
+
+CONCLUSION: retain the READ and virtual-display lifecycle PASS results, record
+the single SMS regression as an unverified failed attempt with no retry, and run
+a non-sending current-versus-`--keep-active` composer diagnostic before changing
+production power behavior. RCS and MMS actual-send regressions remain SKIP.
 
 ## Decision
 
 Do not synthesize or infer a recipient and do not enable an actual-send test on
-the user's behalf. Keep the Phase 3-B SMS evidence as historical evidence, but
-do not claim it as a current Phase 3-C production-send regression. RCS and MMS
-remain unsupported/unverified by this follow-up run.
+the user's behalf. Do not retry the failed Phase 3-C SMS attempt. Compare
+current and `--keep-active` virtual-display behavior without tapping Send and
+without restoring explicit Android wake/sleep injection. Keep the Phase 3-B SMS
+evidence as historical evidence, not proof of the changed Phase 3-C path. RCS
+and MMS remain unsupported/unverified by this follow-up run.
 
 ## Why
 
@@ -71,6 +95,8 @@ unapproved recipient or upgrade a prior-path result into current evidence.
   `TestRealVirtualDisplaySmoke` without a recipient.
 - The actual-send environment check printed only SET/UNSET status and found no
   complete SMS, RCS, or MMS gate pair.
+- The later explicitly gated SMS regression produced no matching accessible
+  provider or Samsung Messages evidence and was not retried.
 
 No recipient, message body, contact, credential, or raw provider row is stored
 in this record.
@@ -87,7 +113,9 @@ in this record.
 
 ## Revisit condition
 
-Run exactly one fresh regression per transport when its enable flag and
-explicit recipient are both deliberately supplied. Update this record after
-Android, One UI, Samsung Messages, scrcpy, layout coordinates, or provider
-shape changes.
+First run the gated non-sending composer A/B diagnostic with a separately
+supplied diagnostic recipient. Use its sanitized display, activity, focus, and
+composer-readiness evidence to decide whether `--keep-active` belongs in
+production. Only then design one fresh actual-send regression under its own
+explicit approval and gate. Update this record after Android, One UI, Samsung
+Messages, scrcpy, layout coordinates, or provider shape changes.
