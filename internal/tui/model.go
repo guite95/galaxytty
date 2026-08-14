@@ -285,11 +285,14 @@ func (m Model) renderChat(w, h int) string {
 		return lipgloss.NewStyle().Width(w).Height(h).Render("Select a conversation")
 	}
 	lines := []string{headerStyle.Render(truncate(m.conversations[m.cursor].Title, w))}
-	for _, msg := range m.messages {
+	visible := max(1, h-1)
+	start := max(0, len(m.messages)-visible)
+	for _, msg := range m.messages[start:] {
 		body := msg.Body
 		if len(msg.Attachments) > 0 {
 			body = "🖼 이미지"
 		}
+		body = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(body)
 		body = truncate(body, max(1, w-3))
 		if msg.Direction == domain.DirectionOutgoing {
 			body = outgoingStyle.Render("→ " + body)

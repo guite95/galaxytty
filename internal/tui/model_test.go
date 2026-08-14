@@ -195,6 +195,31 @@ func TestConversationListRendersOnlyVisibleWindow(t *testing.T) {
 	}
 }
 
+func TestChatRendersLatestVisibleMessageWindow(t *testing.T) {
+	model, _ := fixture(t)
+	model.screen = chatScreen
+	model.messages = make([]domain.Message, 30)
+	for index := range model.messages {
+		model.messages[index] = domain.Message{
+			ID:        int64(index + 1),
+			ThreadID:  1,
+			Body:      fmt.Sprintf("Message %02d", index),
+			Direction: domain.DirectionIncoming,
+		}
+	}
+	model.messages[len(model.messages)-1].Body = "Recent\nmessage"
+	rendered := model.renderChat(24, 10)
+	if !strings.Contains(rendered, "Recent message") {
+		t.Fatal("latest multiline message was not rendered as one line")
+	}
+	if strings.Contains(rendered, "Message 00") {
+		t.Fatal("off-screen message was rendered")
+	}
+	if lines := strings.Count(rendered, "\n") + 1; lines > 10 {
+		t.Fatalf("rendered lines=%d", lines)
+	}
+}
+
 func TestReadOnlySendKeepsComposerAndShowsUnavailable(t *testing.T) {
 	model, _ := readOnlyFixture(t)
 	model = open(t, model)
