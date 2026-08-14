@@ -19,3 +19,10 @@ func TestMalformedProjection(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestEmptyProjectedOutputIsEmpty(t *testing.T) {
+	rows, err := ParseProjectedRows("", []string{"_id"}, "")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
