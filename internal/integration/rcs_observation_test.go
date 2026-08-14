@@ -96,3 +96,18 @@ func TestObserveRCSProviderEvidencePropagatesBasicProviderFailure(t *testing.T) 
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestObserveRCSProviderEvidencePropagatesDisconnectDuringExtensionQuery(t *testing.T) {
+	wantErr := errors.New("synthetic device disconnect")
+	calls := 0
+	_, err := observeRCSProviderEvidence(context.Background(), func(context.Context, ...string) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			return []byte("Row: 0 _id=43, address=01022222222, type=2, body=exact body\n"), nil
+		}
+		return nil, wantErr
+	}, 40, "01022222222", "exact body")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}

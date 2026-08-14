@@ -327,7 +327,10 @@ func observeRCSProviderEvidence(ctx context.Context, shell shellQuery, baseline 
 		return rcsProviderObservation{}, err
 	}
 	if observation.messageID > 0 {
-		observation.extensions = observeSMSExtensions(ctx, shell, observation.messageID)
+		observation.extensions, err = observeSMSExtensions(ctx, shell, observation.messageID)
+		if err != nil {
+			return rcsProviderObservation{}, err
+		}
 	} else {
 		observation.extensions = newSMSExtensionSnapshot()
 	}
@@ -376,10 +379,10 @@ func (s smsExtensionSnapshot) counts() (supported, nonEmpty int) {
 	return supported, nonEmpty
 }
 
-func observeSMSExtensions(ctx context.Context, shell shellQuery, messageID int64) smsExtensionSnapshot {
+func observeSMSExtensions(ctx context.Context, shell shellQuery, messageID int64) (smsExtensionSnapshot, error) {
 	snapshot := newSMSExtensionSnapshot()
 	if messageID <= 0 {
-		return snapshot
+		return snapshot, nil
 	}
 	for _, field := range []string{"teleservice_id", "app_id", "chat_type", "correlation_tag"} {
 		output, err := shell(ctx,
@@ -388,7 +391,7 @@ func observeSMSExtensions(ctx context.Context, shell shellQuery, messageID int64
 			"--where", `"_id = `+strconv.FormatInt(messageID, 10)+`"`,
 		)
 		if err != nil {
-			continue
+			return snapshot, fmt.Errorf("query SMS extension field %s: %w", field, err)
 		}
 		rows, err := provider.ParseContentRows(string(output), []string{"_id", field})
 		if err != nil || len(rows) != 1 {
@@ -398,7 +401,7 @@ func observeSMSExtensions(ctx context.Context, shell shellQuery, messageID int64
 		value := strings.TrimSpace(rows[0][field])
 		snapshot.nonEmpty[field] = value != "" && !strings.EqualFold(value, "null")
 	}
-	return snapshot
+	return snapshot, nil
 }
 
 func discoverTarget(t *testing.T, ctx context.Context, cfg config.Config) *adb.Target {
