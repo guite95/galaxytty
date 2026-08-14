@@ -64,10 +64,18 @@ validated. A successful display lifecycle smoke does not establish that the
 Samsung Messages composer owns a focused, input-capable window on the runtime
 virtual display.
 
+The subsequent non-sending current-versus-`--keep-active` diagnostic isolated
+that variable. Both modes started and parsed a runtime display ID. Both kept a
+Samsung Messages task and focused application associated with the virtual
+display, accepted SENDTO and composer-focus commands, but reported display
+state `OFF`, no resumed Samsung activity, no focused Samsung window, and
+composer readiness false. `--keep-active` produced no difference.
+
 CONCLUSION: retain the READ and virtual-display lifecycle PASS results, record
-the single SMS regression as an unverified failed attempt with no retry, and run
-a non-sending current-versus-`--keep-active` composer diagnostic before changing
-production power behavior. RCS and MMS actual-send regressions remain SKIP.
+the single SMS regression as an unverified failed attempt with no retry, and do
+not restore `--keep-active`. The next investigation must remain non-sending and
+isolate video playback/window presence before another actual-send regression.
+RCS and MMS actual-send regressions remain SKIP.
 
 ## Decision
 
@@ -77,6 +85,11 @@ current and `--keep-active` virtual-display behavior without tapping Send and
 without restoring explicit Android wake/sleep injection. Keep the Phase 3-B SMS
 evidence as historical evidence, not proof of the changed Phase 3-C path. RCS
 and MMS remain unsupported/unverified by this follow-up run.
+
+The A/B result rejects `--keep-active` as the production fix. Keep production
+arguments unchanged until a separate non-sending test determines whether the
+headless-like `--no-video-playback` session is the reason no focused Samsung
+Messages window exists.
 
 ## Why
 
@@ -97,6 +110,11 @@ unapproved recipient or upgrade a prior-path result into current evidence.
   complete SMS, RCS, or MMS gate pair.
 - The later explicitly gated SMS regression produced no matching accessible
   provider or Samsung Messages evidence and was not retried.
+- The non-sending composer diagnostic passed both variants and reported
+  `KEEP_ACTIVE_DIFFERENCE=BOTH_NOT_READY`.
+- Provider correlation reported `ACTUAL_MESSAGE_CREATED=false`; cleanup left no
+  scrcpy process, temporary recording, or virtual display, and the physical
+  display remained `OFF` in the post-cleanup observation.
 
 No recipient, message body, contact, credential, or raw provider row is stored
 in this record.
@@ -113,9 +131,9 @@ in this record.
 
 ## Revisit condition
 
-First run the gated non-sending composer A/B diagnostic with a separately
-supplied diagnostic recipient. Use its sanitized display, activity, focus, and
-composer-readiness evidence to decide whether `--keep-active` belongs in
-production. Only then design one fresh actual-send regression under its own
-explicit approval and gate. Update this record after Android, One UI, Samsung
-Messages, scrcpy, layout coordinates, or provider shape changes.
+Run one gated non-sending `--no-video-playback` versus video-playback diagnostic
+with a separately supplied diagnostic recipient. Only after a variant proves a
+focused, input-capable Samsung Messages window should one fresh actual-send
+regression be designed under its own explicit approval and gate. Update this
+record after Android, One UI, Samsung Messages, scrcpy, layout coordinates, or
+provider shape changes.

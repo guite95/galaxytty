@@ -53,12 +53,37 @@ not yet validated. Compare the current arguments against an otherwise
 identical `--keep-active` variant without tapping Send before selecting a
 production change.
 
+### Current mode observation
+
+The gated non-sending diagnostic started scrcpy without `--keep-active`, parsed
+a runtime display ID, and kept the Samsung Messages task and focused
+application associated with that display. The virtual display reported `OFF`
+after the startup delay, after package-targeted SENDTO with `sms_body`, and
+after the composer-focus input. Samsung Messages was not resumed on the
+virtual display, there was no focused Samsung Messages window, and composer
+readiness was false.
+
+### Keep-active observation
+
+The otherwise identical diagnostic with only `--keep-active` added produced
+the same result. The virtual display reported `OFF`; the Samsung task and
+focused application were associated with the display, but no resumed Samsung
+activity or focused Samsung window appeared. Composer readiness remained
+false. scrcpy 4.1 documents `--keep-active` as simulating user activity to keep
+the screen on, but it did not change this virtual-display state on the
+reference device.
+
 ## Decision
 
-Production scrcpy arguments continue to omit `--keep-active` while the
-non-sending A/B diagnostic is pending. The Samsung controller does not expose
-methods for waking the virtual display, sleeping display 0, or querying
+Production scrcpy arguments continue to omit `--keep-active`; the single-variable
+A/B diagnostic found no readiness benefit. The Samsung controller does not
+expose methods for waking the virtual display, sleeping display 0, or querying
 display power as part of a send. The sender never injects key codes 224 or 223.
+
+The current headless-like path is not considered send-ready on the reference
+device merely because scrcpy starts. Before another actual-send regression,
+the next non-sending investigation must isolate whether video playback supplies
+the focused window or active display state missing from both A/B variants.
 
 The integration tests may read main-display lock and power state before and
 after a gated display/send run. They do not mutate that state.
@@ -87,6 +112,16 @@ caller from reintroducing the behavior without an explicit design change.
   not retry. Its exact SMS verification timed out, and subsequent read-only SMS,
   MMS, Samsung Messages, and draft observations found no evidence that the
   diagnostic message had been created or sent.
+- `TestRealSamsungComposerDiagnostic` passed on the reference device. Both
+  variants accepted package-targeted SENDTO and composer-focus commands without
+  invoking a send action. Both reported the Samsung task and focused application
+  on the runtime display, but display state `OFF`, no resumed Samsung activity,
+  no focused window, and composer readiness false.
+- The diagnostic used an explicitly supplied fictional reserved recipient and
+  synthetic Unicode marker. It found no matching outgoing SMS or MMS evidence
+  and no matching SMS-provider row of any type.
+- Each variant stopped and reaped scrcpy, removed its runtime display, removed
+  its temporary recording, and preserved the observed physical-display state.
 
 ## Alternatives rejected
 
@@ -96,13 +131,17 @@ caller from reintroducing the behavior without an explicit design change.
   interaction.
 - Adding a larger Android power-manager abstraction is unnecessary while no
   mutation is required.
+- Restoring `--keep-active` is rejected because the controlled A/B produced no
+  display, task, focus, or composer-readiness improvement.
+- Tapping Send to distinguish UI readiness is rejected because display and
+  focused-window state can be observed without creating a carrier message.
 
 ## Revisit condition
 
-Complete the gated current-versus-`--keep-active` composer diagnostic on the
-reference device. Restore `--keep-active` only if the single-variable comparison
-shows a reproducible display, activity, focus, or composer-readiness difference.
-Any explicit Android power reintroduction must separately record pre-send and
-current lock/power state, avoid sleeping an unlocked user session, and include a
-regression test for the exact minimal mutation required. Re-run the decision
-after Android, One UI, Samsung Messages, or scrcpy updates.
+Before any actual-send retry, compare the current `--no-video-playback` session
+against an otherwise equivalent video-playback session without tapping Send.
+Revisit `--keep-active` only after Android, One UI, Samsung Messages, or scrcpy
+updates produce different evidence. Any explicit Android power reintroduction
+must separately record pre-send and current lock/power state, avoid sleeping an
+unlocked user session, and include a regression test for the exact minimal
+mutation required.

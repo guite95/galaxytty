@@ -99,6 +99,14 @@ or run a cleanup sleep command. All message UI input is sent only to the
 runtime Android logical display ID parsed from scrcpy output. GalaxyTTY never
 enters a PIN or intentionally unlocks the main display.
 
+Reference-device validation currently has an open send-path limitation. A
+non-sending A/B on SM-A376N found that both the default headless-like session
+and the same session with `--keep-active` left the virtual display `OFF` with no
+focused Samsung Messages window. `--keep-active` therefore remains disabled,
+and the changed Phase 3-C production path is not claimed as actual-send
+verified until the video-playback/window dependency is isolated. See the
+[virtual-display power decision](docs/decisions/0002-virtual-display-power-behavior.md).
+
 ### Transport verification
 
 | Transport | Send path | Machine verification | Evidence and limitation |
