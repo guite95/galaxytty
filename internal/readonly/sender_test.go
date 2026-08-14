@@ -9,8 +9,11 @@ import (
 )
 
 func TestSenderAlwaysRejects(t *testing.T) {
-	err := (Sender{}).Send(context.Background(), "synthetic", "synthetic")
+	result, err := (Sender{}).Send(context.Background(), "synthetic", "synthetic")
 	if !errors.Is(err, domain.ErrSendingNotImplemented) {
 		t.Fatalf("err=%v", err)
+	}
+	if result != (domain.SendResult{}) {
+		t.Fatalf("result=%+v", result)
 	}
 }

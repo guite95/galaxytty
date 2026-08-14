@@ -24,4 +24,5 @@ var (
 	ErrClipboardSet                 = errors.New("clipboard set failed")
 	ErrClipboardPaste               = errors.New("clipboard paste failed")
 	ErrSendTap                      = errors.New("Samsung Messages send tap failed")
+	ErrSendVerificationTimeout      = errors.New("send verification timed out")
 )

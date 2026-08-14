@@ -73,7 +73,7 @@ func TestRealGalaxyReadPath(t *testing.T) {
 			t.Fatal("invalid incremental SMS mapping")
 		}
 	}
-	if err := runtime.Service.SendToAddress(ctx, "synthetic", "synthetic"); !errors.Is(err, domain.ErrSendingNotImplemented) {
+	if _, err := runtime.Service.SendToAddress(ctx, "synthetic", "synthetic"); !errors.Is(err, domain.ErrSendingNotImplemented) {
 		t.Fatalf("send err=%v", err)
 	}
 }

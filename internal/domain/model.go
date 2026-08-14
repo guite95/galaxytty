@@ -80,6 +80,10 @@ type MessageQuery struct {
 	Limit    int
 	BeforeID int64
 }
+type SendResult struct {
+	MessageID int64 `json:"message_id"`
+	ThreadID  int64 `json:"thread_id"`
+}
 
 type Device interface {
 	State(context.Context) (DeviceState, error)
@@ -109,7 +113,7 @@ type VirtualDisplayManager interface {
 	Healthy(context.Context) bool
 }
 type MessageSender interface {
-	Send(context.Context, string, string) error
+	Send(context.Context, string, string) (SendResult, error)
 }
 type ConversationController interface {
 	OpenConversation(context.Context, VirtualDisplay, string) error

@@ -71,7 +71,7 @@ func TestCommandsDefaultsAndSender(t *testing.T) {
 		t.Fatal(x, e)
 	}
 	b := mock.New()
-	if e = b.Send(context.Background(), "010-1234-5678", "안녕 😀"); e != nil || len(b.Sent) != 1 {
+	if _, e = b.Send(context.Background(), "010-1234-5678", "안녕 😀"); e != nil || len(b.Sent) != 1 {
 		t.Fatal(e)
 	}
 }

@@ -165,7 +165,8 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		if err := flags.Parse(opts.command[1:]); err != nil {
 			return err
 		}
-		return service.SendToAddress(ctx, *to, *text)
+		_, err := service.SendToAddress(ctx, *to, *text)
+		return err
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join(opts.command, " "))
 	}

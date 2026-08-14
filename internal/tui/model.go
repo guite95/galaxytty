@@ -191,7 +191,10 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		}
 	}
 	id := m.selectedID()
-	return m, func() tea.Msg { return sentMsg{m.service.SendToConversation(m.ctx, id, value)} }
+	return m, func() tea.Msg {
+		_, err := m.service.SendToConversation(m.ctx, id, value)
+		return sentMsg{err}
+	}
 }
 func (m Model) selectedID() int64 {
 	if m.cursor >= 0 && m.cursor < len(m.conversations) {

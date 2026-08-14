@@ -18,7 +18,7 @@ func TestMockBuildsApplicationWithThreadAwareSending(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := runtime.Service.SendToConversation(ctx, 2, "synthetic hello"); err != nil {
+	if _, err := runtime.Service.SendToConversation(ctx, 2, "synthetic hello"); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := runtime.Service.Messages(ctx, 2, domain.MessageQuery{})
@@ -63,7 +63,7 @@ func TestRealBuildsReadOnlyApplicationAndInitializesPolling(t *testing.T) {
 	if status.Label != "USB" || status.Connection != domain.ConnectionUSB {
 		t.Fatalf("status=%+v", status)
 	}
-	if err := runtime.Service.SendToAddress(context.Background(), "synthetic", "synthetic"); !errors.Is(err, domain.ErrSendingNotImplemented) {
+	if _, err := runtime.Service.SendToAddress(context.Background(), "synthetic", "synthetic"); !errors.Is(err, domain.ErrSendingNotImplemented) {
 		t.Fatalf("send err=%v", err)
 	}
 	if messages, err := runtime.Service.Poll(context.Background(), 0); err != nil || len(messages) != 0 {
