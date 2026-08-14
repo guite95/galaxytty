@@ -62,7 +62,7 @@ func TestSelectResizeAndEsc(t *testing.T) {
 }
 
 func TestConversationListKeepsJKQAsComposerInput(t *testing.T) {
-	for _, input := range []string{"j", "k", "/search j k q"} {
+	for _, input := range []string{"j", "k", "q", "/search j k q"} {
 		m, _ := fixture(t)
 		m.cursor = 1
 		m = typeText(m, input)
@@ -213,6 +213,51 @@ func TestCtrlCShutsDown(t *testing.T) {
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("shutdown did not quit")
 	}
+}
+
+type blockingSendAPI struct {
+	app.API
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingSendAPI) SendToConversation(ctx context.Context, _ int64, _ string) (domain.SendResult, error) {
+	close(s.started)
+	select {
+	case <-ctx.Done():
+		return domain.SendResult{}, ctx.Err()
+	case <-s.release:
+		return domain.SendResult{}, errors.New("test released blocked send")
+	}
+}
+
+func TestCtrlCDuringSendCancelsOperationBeforeShutdown(t *testing.T) {
+	m, _ := fixture(t)
+	m = open(t, m)
+	blocking := &blockingSendAPI{API: m.service, started: make(chan struct{}), release: make(chan struct{})}
+	defer close(blocking.release)
+	m.service = blocking
+	m = typeText(m, "synthetic send")
+
+	updated, send := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	sendResult := make(chan tea.Msg, 1)
+	go func() { sendResult <- send() }()
+	<-blocking.started
+
+	_, shutdown := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if shutdown == nil {
+		t.Fatal("missing shutdown command")
+	}
+	select {
+	case result := <-sendResult:
+		if sent, ok := result.(sentMsg); !ok || !errors.Is(sent.err, context.Canceled) {
+			t.Fatalf("send result=%#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("send context was not canceled by Ctrl+C")
+	}
+	_ = shutdown()
 }
 
 func TestAsyncIncomingRefresh(t *testing.T) {

@@ -50,6 +50,7 @@ type tickMsg time.Time
 
 type Model struct {
 	ctx               context.Context
+	cancel            context.CancelFunc
 	service           app.API
 	composer          textinput.Model
 	conversations     []domain.Conversation
@@ -68,6 +69,7 @@ type Model struct {
 const historyPageLimit = 200
 
 func NewModel(ctx context.Context, service app.API, interval time.Duration) Model {
+	modelCtx, cancel := context.WithCancel(ctx)
 	i := textinput.New()
 	i.Placeholder = "메시지 입력..."
 	i.Prompt = "> "
@@ -76,7 +78,7 @@ func NewModel(ctx context.Context, service app.API, interval time.Duration) Mode
 	if interval <= 0 {
 		interval = time.Second
 	}
-	return Model{ctx: ctx, service: service, composer: i, pollInterval: interval, status: "Loading…", width: 80, height: 24}
+	return Model{ctx: modelCtx, cancel: cancel, service: service, composer: i, pollInterval: interval, status: "Loading…", width: 80, height: 24}
 }
 func (m Model) Init() tea.Cmd { return tea.Batch(m.loadConversations(), m.tick()) }
 func (m Model) loadConversations() tea.Cmd {
@@ -105,6 +107,9 @@ func (m Model) poll() tea.Cmd {
 	return func() tea.Msg { v, e := m.service.Poll(m.ctx, focused); return pollMsg{v, e} }
 }
 func (m Model) shutdown() tea.Cmd {
+	if m.cancel != nil {
+		m.cancel()
+	}
 	return func() tea.Msg { return shutdownMsg{m.service.Shutdown(context.Background())} }
 }
 
