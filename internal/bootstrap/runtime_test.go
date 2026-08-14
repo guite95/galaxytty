@@ -55,6 +55,8 @@ func (b *syntheticADB) Shell(_ context.Context, target string, args ...string) (
 		return []byte("HARDWARE123\n"), nil
 	case "pm path com.samsung.android.messaging":
 		return []byte("package:/synthetic/base.apk\n"), nil
+	case "cmd role get-role-holders android.app.role.SMS":
+		return []byte("com.samsung.android.messaging\n"), nil
 	case "dumpsys display":
 		return []byte("Display Id=0\n  Display State=OFF\nDisplay Id=18\n  Display State=ON\n"), nil
 	}

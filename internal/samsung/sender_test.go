@@ -62,6 +62,9 @@ func (c *senderController) call(name string) error {
 func (c *senderController) OpenConversation(context.Context, domain.VirtualDisplay, string) error {
 	return c.call("conversation.open")
 }
+func (c *senderController) EnsureDefaultSMSHandler(context.Context) error {
+	return c.call("role.check")
+}
 func (c *senderController) OpenConversationWithBody(context.Context, domain.VirtualDisplay, string, string) error {
 	return c.call("conversation.open-body")
 }
@@ -181,7 +184,7 @@ func TestSenderRunsVerifiedSequenceAndRestoresClipboard(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	want := []string{
-		"display.start", "power.read", "power.wake", "display.home",
+		"role.check", "display.start", "power.read", "power.wake", "display.home",
 		"clipboard.read", "clipboard.set", "display.clipboard-sync", "wait.sync",
 		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "wait.settle",
 		"store.latest", "send.tap", "store.after", "clipboard.restore", "power.restore",
@@ -202,7 +205,7 @@ func TestSenderUsesVerifiedIntentBodyCompatibilityPath(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	want := []string{
-		"display.start", "power.read", "power.wake", "conversation.open-body",
+		"role.check", "display.start", "power.read", "power.wake", "conversation.open-body",
 		"wait.ready", "composer.tap", "wait.settle", "store.latest", "send.tap",
 		"store.after", "power.restore",
 	}
@@ -219,12 +222,24 @@ func TestSenderStopsDisplayAfterControllerFailure(t *testing.T) {
 		t.Fatalf("err=%v stops=%d", err, display.stops)
 	}
 	want := []string{
-		"display.start", "power.read", "power.wake", "display.home",
+		"role.check", "display.start", "power.read", "power.wake", "display.home",
 		"clipboard.read", "clipboard.set", "display.clipboard-sync", "wait.sync",
 		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "display.stop", "clipboard.restore", "power.restore",
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls=%q want=%q", *calls, want)
+	}
+}
+
+func TestSenderRequiresDefaultSamsungRoleBeforeStartingDisplay(t *testing.T) {
+	sender, calls, display, controller, _, _ := senderFixture(t)
+	controller.failAt = "role.check"
+	_, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀")
+	if !errors.Is(err, controller.err) || display.stops != 0 {
+		t.Fatalf("err=%v stops=%d", err, display.stops)
+	}
+	if !reflect.DeepEqual(*calls, []string{"role.check"}) {
+		t.Fatalf("calls=%q", *calls)
 	}
 }
 

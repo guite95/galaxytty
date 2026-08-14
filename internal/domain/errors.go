@@ -11,6 +11,7 @@ var (
 	ErrOffline                      = errors.New("adb device offline")
 	ErrMultipleDevices              = errors.New("multiple eligible Galaxy devices found")
 	ErrSamsungMessagesNotInstalled  = errors.New("Samsung Messages is not installed")
+	ErrSamsungMessagesNotDefault    = errors.New("Samsung Messages is not the default SMS handler")
 	ErrWirelessDiscoveryUnavailable = errors.New("wireless ADB discovery is unavailable")
 	ErrProviderPermissionDenied     = errors.New("Android provider permission denied")
 	ErrProviderOutput               = errors.New("malformed Android provider output")

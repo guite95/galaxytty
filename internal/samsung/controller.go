@@ -49,7 +49,12 @@ func (c *Controller) OpenConversation(ctx context.Context, display domain.Virtua
 		"--display", displayID(display),
 		"-a", "android.intent.action.SENDTO",
 		"-d", "smsto:"+phone,
+		"-p", MessagesPackage,
 	)
+}
+
+func (c *Controller) EnsureDefaultSMSHandler(ctx context.Context) error {
+	return ensureDefaultSMSHandler(ctx, c.device)
 }
 
 func (c *Controller) OpenConversationWithBody(ctx context.Context, display domain.VirtualDisplay, phone, body string) error {
@@ -69,6 +74,7 @@ func (c *Controller) OpenConversationWithBody(ctx context.Context, display domai
 		"--display", displayID(display),
 		"-a", "android.intent.action.SENDTO",
 		"-d", "smsto:"+phone,
+		"-p", MessagesPackage,
 		"--es", "sms_body", quotedBody,
 	)
 }

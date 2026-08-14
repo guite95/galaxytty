@@ -15,6 +15,7 @@ const cleanupTimeout = 2 * time.Second
 
 type MessageController interface {
 	domain.ConversationController
+	EnsureDefaultSMSHandler(context.Context) error
 	OpenConversationWithBody(context.Context, domain.VirtualDisplay, string, string) error
 	MainDisplayOff(context.Context) (bool, error)
 	WakeVirtualDisplay(context.Context, domain.VirtualDisplay) error
@@ -85,6 +86,9 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 	}
 	if strings.TrimSpace(text) == "" {
 		return domain.SendResult{}, fmt.Errorf("message text is required")
+	}
+	if err := s.controller.EnsureDefaultSMSHandler(ctx); err != nil {
+		return domain.SendResult{}, err
 	}
 
 	display, err := s.display.Start(ctx)

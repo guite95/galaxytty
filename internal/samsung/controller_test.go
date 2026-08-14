@@ -32,12 +32,18 @@ func (d *controllerDevice) Shell(_ context.Context, args ...string) ([]byte, err
 }
 
 func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
-	device := &controllerDevice{outputs: [][]byte{[]byte("Display Id=0\n  Display State=OFF\n")}}
+	device := &controllerDevice{outputs: [][]byte{
+		[]byte("com.samsung.android.messaging\n"),
+		[]byte("Display Id=0\n  Display State=OFF\n"),
+	}}
 	controller, err := NewController(device, DefaultLayout())
 	if err != nil {
 		t.Fatal(err)
 	}
 	display := domain.VirtualDisplay{AndroidDisplayID: 18, Width: 1080, Height: 1920}
+	if err := controller.EnsureDefaultSMSHandler(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	wasOff, err := controller.MainDisplayOff(context.Background())
 	if err != nil || !wasOff {
 		t.Fatalf("wasOff=%t err=%v", wasOff, err)
@@ -71,11 +77,12 @@ func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
 	}
 
 	want := [][]string{
+		{"cmd", "role", "get-role-holders", "android.app.role.SMS"},
 		{"dumpsys", "display"},
 		{"input", "-d", "18", "keyevent", "224"},
 		{"input", "-d", "18", "keyevent", "3"},
-		{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678"},
-		{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678", "--es", "sms_body", `'It'"'"'s 한글 😀'`},
+		{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678", "-p", "com.samsung.android.messaging"},
+		{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678", "-p", "com.samsung.android.messaging", "--es", "sms_body", `'It'"'"'s 한글 😀'`},
 		{"input", "-d", "18", "tap", "500", "1800"},
 		{"input", "-d", "18", "keycombination", "113", "29"},
 		{"input", "-d", "18", "keyevent", "67"},
