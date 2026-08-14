@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -56,6 +57,9 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 	opts, err := parseOptions(args)
 	if err != nil {
 		return err
+	}
+	if !opts.mock {
+		defer func() { err = actionableRealError(err) }()
 	}
 	if opts.help {
 		printHelp(out)
@@ -164,6 +168,33 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		return service.SendToAddress(ctx, *to, *text)
 	default:
 		return fmt.Errorf("unknown command %q", strings.Join(opts.command, " "))
+	}
+}
+
+func actionableRealError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, domain.ErrADBNotFound):
+		return fmt.Errorf("%w. Install Android platform-tools and ensure adb is on PATH", err)
+	case errors.Is(err, domain.ErrNoDevices):
+		return fmt.Errorf("%w. Enable USB debugging or connect an already-paired Wireless Debugging device", err)
+	case errors.Is(err, domain.ErrUnauthorized):
+		return fmt.Errorf("%w. Authorize this Mac on the Galaxy, then retry", err)
+	case errors.Is(err, domain.ErrOffline):
+		return fmt.Errorf("%w. Reconnect USB or an already-paired Wireless Debugging target", err)
+	case errors.Is(err, domain.ErrMultipleDevices):
+		return fmt.Errorf("%w. Select one with --device <adb-target>", err)
+	case errors.Is(err, domain.ErrSamsungMessagesNotInstalled):
+		return fmt.Errorf("%w. Install or enable com.samsung.android.messaging", err)
+	case errors.Is(err, domain.ErrProviderPermissionDenied):
+		return fmt.Errorf("%w. This Galaxy does not allow ADB shell read access to the required provider", err)
+	case errors.Is(err, domain.ErrProviderOutput):
+		return fmt.Errorf("%w. Run msg doctor and verify the device provider shape", err)
+	case errors.Is(err, domain.ErrWirelessDiscoveryUnavailable):
+		return fmt.Errorf("%w. Connect an already-paired target so it appears in adb devices -l", err)
+	default:
+		return err
 	}
 }
 

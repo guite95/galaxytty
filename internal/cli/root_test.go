@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/galaxytty/galaxytty/internal/adb"
 	"github.com/galaxytty/galaxytty/internal/bootstrap"
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/doctor"
@@ -159,5 +160,23 @@ func TestRealFactoryErrorLeavesJSONStdoutEmpty(t *testing.T) {
 	err := execute(context.Background(), strings.NewReader(""), &out, []string{"conversations", "--json"}, deps)
 	if err == nil || out.Len() != 0 {
 		t.Fatalf("out=%q err=%v", out.String(), err)
+	}
+}
+
+func TestRealNoDeviceErrorIsActionable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+		return nil, adb.ErrNoDevices
+	}}
+	var out bytes.Buffer
+	err := execute(context.Background(), strings.NewReader(""), &out, []string{"conversations", "--json"}, deps)
+	if !errors.Is(err, adb.ErrNoDevices) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "Enable USB debugging") || !strings.Contains(err.Error(), "already-paired Wireless Debugging") {
+		t.Fatalf("error is not actionable: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("JSON stdout=%q", out.String())
 	}
 }
