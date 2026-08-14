@@ -99,6 +99,8 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %v", ErrUnauthorized, err)
 	case strings.Contains(detail, "offline"):
 		return nil, fmt.Errorf("%w: %v", ErrOffline, err)
+	case strings.Contains(detail, "no devices/emulators found"):
+		return nil, fmt.Errorf("%w: %v", ErrNoDevices, err)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil, err
