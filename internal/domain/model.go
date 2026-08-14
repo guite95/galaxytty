@@ -109,6 +109,7 @@ type Contacts interface {
 }
 type VirtualDisplayManager interface {
 	Start(context.Context) (VirtualDisplay, error)
+	SyncClipboard(context.Context) error
 	Stop(context.Context) error
 	Healthy(context.Context) bool
 }

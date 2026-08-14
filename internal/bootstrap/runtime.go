@@ -89,6 +89,7 @@ func (d realDependencies) withDefaults() realDependencies {
 				SendSettleDelay:        cfg.Samsung.SendSettleDelay.Duration,
 				VerificationTimeout:    cfg.Samsung.VerificationTimeout.Duration,
 				VerificationInterval:   verificationInterval,
+				UseIntentBody:          true,
 			}
 		}
 	}

@@ -9,7 +9,7 @@ type Layout struct {
 	Composer, Send Point
 }
 
-func DefaultLayout() Layout { return Layout{1080, 1920, Point{500, 1800}, Point{1004, 1273}} }
+func DefaultLayout() Layout { return Layout{1080, 1920, Point{500, 1800}, Point{1004, 955}} }
 
 func (l Layout) Validate() error {
 	if l.Width <= 0 || l.Height <= 0 {

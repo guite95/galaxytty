@@ -58,10 +58,15 @@ The following non-sensitive facts were rechecked before implementation:
   `go build ./cmd/msg` passed before Phase 3-B changes.
 - One authorized SM-A376N is currently discoverable by the Phase 3-A ADB path.
 - scrcpy 4.1 is installed.
-- Its public help documents `--new-display`, `--start-app`, `--record`,
-  `--no-video-playback`, `--no-audio`, and `--no-window`.
-- The previously verified compatible headless-like combination remains the
-  implementation contract: recording plus disabled video playback and audio.
+- Its public help documents `--new-display`, `--display-ime-policy=local`,
+  `--start-app`, `--record`, `--keep-active`, and `--no-audio`.
+- Live verification showed that host-to-device clipboard synchronization is
+  triggered by scrcpy's public paste shortcut, so the manager uses a tiny
+  borderless playback window instead of disabled video playback. The current
+  Android 16 virtual display does not expose that clipboard to Samsung
+  Messages, so the reference runtime uses Android's documented `sms_body`
+  `SENDTO` extra while retaining the clipboard path as a tested compatibility
+  path.
 - The user explicitly opted into an actual send test and supplied a dedicated
   recipient. The value is never copied into source, fixtures, documentation,
   commits, or the final report.
@@ -147,10 +152,14 @@ remain usable when scrcpy is absent. Production defaults are:
 scrcpy
 -s <selected-target>
 --new-display=1080x1920
+--display-ime-policy=local
 --start-app=com.samsung.android.messaging
 --record=<unique-temporary-file>.mp4
---no-video-playback
 --no-audio
+--keep-active
+--window-width=1
+--window-height=1
+--window-borderless
 ```
 
 Arguments are passed directly to `exec.Command` without a host shell. The
@@ -203,16 +212,20 @@ Input operations use the same display ID:
 
 ```text
 input -d <id> tap <composer-x> <composer-y>
+input -d <id> keycombination 113 29
+input -d <id> keyevent 67
 input -d <id> keyevent 279
 input -d <id> tap <send-x> <send-y>
 ```
 
 The composer tap is retained for deterministic focus because UIAutomator cannot
 reliably inspect the virtual display. Key code 279 is `KEYCODE_PASTE`; the
-controller never exposes or uses `input text`.
+controller never exposes or uses `input text`. The controller can also provide
+the body with the standard `sms_body` extra. Its remote-shell quoting rejects
+NUL and safely preserves spaces, quotes, newlines, Korean, and emoji.
 
-The default layout is the existing 1080x1920 profile with composer `(500,1800)`
-and send `(1004,1273)`. Coordinates appear only in `samsung.DefaultLayout` and
+The default layout is the current 1080x1920 profile with composer `(500,1800)`
+and send `(1004,955)`. Coordinates appear only in `samsung.DefaultLayout` and
 configuration defaults. Controller errors identify the failed operation but do
 not include recipient or message text.
 
@@ -226,8 +239,9 @@ is unavailable:
 - `pbpaste` returns the current clipboard bytes.
 - `pbcopy` receives the new bytes on stdin.
 
-The domain clipboard port minimally expands to `Read` and `Set`. The sender owns
-the temporary-clipboard transaction so the main send error remains primary:
+The domain clipboard port minimally expands to `Read` and `Set`. In clipboard
+compatibility mode, the sender owns the temporary-clipboard transaction so the
+main send error remains primary:
 
 1. Read the old value.
 2. Set the outgoing text.
@@ -247,22 +261,38 @@ debug output includes clipboard contents.
 virtual-display manager, Samsung controller, clipboard, message store, timing
 configuration, and an injected wait function used by tests.
 
-The exact sequence is:
+The reference-device sequence is:
 
 1. Validate non-empty normalized recipient and non-blank text.
 2. `Start` or reuse the lazy virtual display.
-3. Open the recipient conversation on that display.
-4. Wait the bounded internal conversation-ready delay.
-5. Tap the configured composer coordinate.
-6. Read the host clipboard and set the outgoing text.
-7. Wait `clipboard_sync_delay`.
-8. Send display-specific `KEYCODE_PASTE`.
-9. Wait `send_settle_delay`.
-10. Read `LatestMessageID` immediately before the send action.
-11. Tap the configured send coordinate.
-12. Poll `MessagesAfter(baselineID)` until an exact match appears or the
-    verification timeout/context expires.
-13. Restore the previous host clipboard and return the verified IDs.
+3. Record the main display power state and wake the virtual-display power group
+   only when necessary.
+4. Open the recipient conversation on that display using `SENDTO`, with the
+   exact text in the standard `sms_body` extra.
+5. Wait the bounded internal conversation-ready delay.
+6. Tap the configured composer coordinate and wait the short settle delay.
+7. Read `LatestMessageID` immediately before the send action.
+8. Tap the configured send coordinate.
+9. Poll `MessagesAfter(baselineID)` until an exact match appears or the
+   verification timeout/context expires.
+10. Restore the original main-display off state when it was initially off and
+    return the verified IDs.
+
+The retained clipboard compatibility sequence is:
+
+1. Move to a safe virtual-display Home screen.
+2. Read the host clipboard and set the outgoing text.
+3. Use scrcpy's public physical `MOD+v` shortcut to synchronize the clipboard.
+4. Open the conversation, focus and clear the composer, and inject
+   display-specific `KEYCODE_PASTE`.
+5. Settle, establish the provider baseline, tap Send, verify, and restore the
+   host clipboard.
+
+The earlier clipboard-only reference sequence was rejected by live testing:
+scrcpy reported a successful device clipboard set, but Samsung Messages on the
+current virtual display saw no pasteable text. The standard intent extra is the
+smallest public Android compatibility adjustment and Samsung Messages remains
+the application that performs the actual transport.
 
 The verification predicate requires all of:
 
@@ -292,14 +322,14 @@ The only new user-tunable timings are those most likely to vary by host/device:
 display_width = 1080
 display_height = 1920
 clipboard_sync_delay = "300ms"
-send_settle_delay = "200ms"
+send_settle_delay = "500ms"
 verification_timeout = "10s"
 
 [samsung.layout]
 composer_x = 500
 composer_y = 1800
 send_x = 1004
-send_y = 1273
+send_y = 955
 ```
 
 Startup timeout, verification poll interval, package name, and the short
@@ -360,9 +390,10 @@ Send:  ready
 ```
 
 Send readiness requires an eligible Samsung Galaxy, Samsung Messages, the SMS
-provider used for verification, scrcpy executable/version inspection, macOS
-clipboard tools, and a valid layout profile. Missing scrcpy or clipboard tools
-does not incorrectly mark the Phase 3-A read path unavailable.
+provider used for verification, scrcpy executable/version inspection, and a
+valid layout profile. Clipboard compatibility is reported separately: missing
+clipboard tools leaves the standard intent-body send and Phase 3-A reads
+available, while missing scrcpy makes only send unavailable.
 
 ## Errors and privacy
 
@@ -456,9 +487,10 @@ No commit includes a Codex co-author trailer or generated-by footer.
 
 Phase 3-B is accepted when the real default path still reads conversations and
 messages, the first real send lazily starts a reusable scrcpy virtual display,
-Samsung Messages receives Unicode text through clipboard paste on the runtime
-logical display, a send succeeds only after an exact outgoing provider row is
-observed, CLI/TUI/mock/doctor behaviors match this design, shutdown reaps and
-cleans scrcpy, the explicit real-device integration succeeds without changing
-the main display lock state, and all requested Go test/race/vet/build commands
-pass.
+Samsung Messages receives exact Unicode text through the standard `sms_body`
+compatibility path on the reference runtime, while clipboard paste remains
+available for devices where the virtual clipboard works. A send succeeds only
+after an exact outgoing provider row is observed, CLI/TUI/mock/doctor behaviors
+match this design, shutdown reaps and cleans scrcpy, the explicit real-device
+integration succeeds without changing the main display lock state, and all
+requested Go test/race/vet/build commands pass.

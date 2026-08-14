@@ -134,16 +134,15 @@ func (s Service) finish(ctx context.Context, cfg config.Config, report *Report, 
 		lookPath = exec.LookPath
 	}
 	clipboardReady := true
-	for _, name := range []string{"pbcopy", "pbpaste"} {
+	for _, name := range []string{"pbcopy", "pbpaste", "osascript"} {
 		if _, err := lookPath(name); err != nil {
 			clipboardReady = false
 		}
 	}
 	if clipboardReady {
-		report.Checks = append(report.Checks, Check{Name: "macOS clipboard", Detail: "pbcopy and pbpaste available", State: Pass})
+		report.Checks = append(report.Checks, Check{Name: "macOS clipboard compatibility", Detail: "pbcopy, pbpaste, and scrcpy shortcut bridge available", State: Pass})
 	} else {
-		report.Checks = append(report.Checks, Check{Name: "macOS clipboard", Detail: "pbcopy or pbpaste unavailable", State: Fail})
-		sendPrerequisites = false
+		report.Checks = append(report.Checks, Check{Name: "macOS clipboard compatibility", Detail: "unavailable; intent-body send remains supported", State: Info})
 	}
 
 	layout := samsung.Layout{

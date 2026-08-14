@@ -15,7 +15,13 @@ const cleanupTimeout = 2 * time.Second
 
 type MessageController interface {
 	domain.ConversationController
+	OpenConversationWithBody(context.Context, domain.VirtualDisplay, string, string) error
+	MainDisplayOff(context.Context) (bool, error)
+	WakeVirtualDisplay(context.Context, domain.VirtualDisplay) error
+	ShowHome(context.Context, domain.VirtualDisplay) error
+	SleepMainDisplay(context.Context) error
 	FocusComposer(context.Context, domain.VirtualDisplay) error
+	ClearComposer(context.Context, domain.VirtualDisplay) error
 	Paste(context.Context, domain.VirtualDisplay) error
 	TapSend(context.Context, domain.VirtualDisplay) error
 }
@@ -26,6 +32,8 @@ type SenderConfig struct {
 	SendSettleDelay        time.Duration
 	VerificationTimeout    time.Duration
 	VerificationInterval   time.Duration
+	// UseIntentBody supports virtual displays whose app cannot consume the global clipboard.
+	UseIntentBody bool
 }
 
 func (c SenderConfig) validate() error {
@@ -69,7 +77,8 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if domain.NormalizePhone(phone) == "" {
+	normalizedPhone := domain.NormalizePhone(phone)
+	if normalizedPhone == "" {
 		return domain.SendResult{}, fmt.Errorf("recipient is required")
 	}
 	if strings.TrimSpace(text) == "" {
@@ -80,13 +89,43 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 	if err != nil {
 		return domain.SendResult{}, fmt.Errorf("start virtual display: %w", err)
 	}
-	if err := s.controller.OpenConversation(ctx, display, phone); err != nil {
+	mainWasOff, err := s.controller.MainDisplayOff(ctx)
+	if err != nil {
 		return domain.SendResult{}, s.controllerError(err)
 	}
-	if err := s.wait(ctx, s.config.ConversationReadyDelay); err != nil {
-		return domain.SendResult{}, fmt.Errorf("wait for Samsung Messages conversation: %w", err)
+	if mainWasOff {
+		defer func() {
+			restoreCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+			defer cancel()
+			if restoreErr := s.controller.SleepMainDisplay(restoreCtx); restoreErr != nil {
+				restoreErr = fmt.Errorf("restore main display power: %w", restoreErr)
+				if err == nil {
+					err = restoreErr
+				} else {
+					err = errors.Join(err, restoreErr)
+				}
+			}
+		}()
+		if err := s.controller.WakeVirtualDisplay(ctx, display); err != nil {
+			return domain.SendResult{}, s.controllerError(err)
+		}
 	}
-	if err := s.controller.FocusComposer(ctx, display); err != nil {
+	if s.config.UseIntentBody {
+		if err := s.controller.OpenConversationWithBody(ctx, display, normalizedPhone, text); err != nil {
+			return domain.SendResult{}, s.controllerError(err)
+		}
+		if err := s.wait(ctx, s.config.ConversationReadyDelay); err != nil {
+			return domain.SendResult{}, fmt.Errorf("wait for Samsung Messages conversation: %w", err)
+		}
+		if err := s.controller.FocusComposer(ctx, display); err != nil {
+			return domain.SendResult{}, s.controllerError(err)
+		}
+		if err := s.wait(ctx, s.config.SendSettleDelay); err != nil {
+			return domain.SendResult{}, fmt.Errorf("wait for Samsung Messages composer: %w", err)
+		}
+		return s.tapAndVerify(ctx, display, normalizedPhone, text)
+	}
+	if err := s.controller.ShowHome(ctx, display); err != nil {
 		return domain.SendResult{}, s.controllerError(err)
 	}
 
@@ -110,8 +149,23 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 		}
 	}()
 
+	if err := s.display.SyncClipboard(ctx); err != nil {
+		return domain.SendResult{}, s.controllerError(err)
+	}
 	if err := s.wait(ctx, s.config.ClipboardSyncDelay); err != nil {
 		return domain.SendResult{}, fmt.Errorf("wait for clipboard synchronization: %w", err)
+	}
+	if err := s.controller.OpenConversation(ctx, display, phone); err != nil {
+		return domain.SendResult{}, s.controllerError(err)
+	}
+	if err := s.wait(ctx, s.config.ConversationReadyDelay); err != nil {
+		return domain.SendResult{}, fmt.Errorf("wait for Samsung Messages conversation: %w", err)
+	}
+	if err := s.controller.FocusComposer(ctx, display); err != nil {
+		return domain.SendResult{}, s.controllerError(err)
+	}
+	if err := s.controller.ClearComposer(ctx, display); err != nil {
+		return domain.SendResult{}, s.controllerError(err)
 	}
 	if err := s.controller.Paste(ctx, display); err != nil {
 		return domain.SendResult{}, s.controllerError(err)
@@ -120,6 +174,10 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 		return domain.SendResult{}, fmt.Errorf("wait for Samsung Messages composer: %w", err)
 	}
 
+	return s.tapAndVerify(ctx, display, normalizedPhone, text)
+}
+
+func (s *Sender) tapAndVerify(ctx context.Context, display domain.VirtualDisplay, phone, text string) (domain.SendResult, error) {
 	baseline, err := s.store.LatestMessageID(ctx)
 	if err != nil {
 		return domain.SendResult{}, s.maybeDisconnectError(err)
@@ -127,7 +185,7 @@ func (s *Sender) Send(ctx context.Context, phone, text string) (result domain.Se
 	if err := s.controller.TapSend(ctx, display); err != nil {
 		return domain.SendResult{}, s.controllerError(err)
 	}
-	result, err = verifySent(ctx, s.store, baseline, phone, text, s.config.VerificationTimeout, s.config.VerificationInterval)
+	result, err := verifySent(ctx, s.store, baseline, phone, text, s.config.VerificationTimeout, s.config.VerificationInterval)
 	if err != nil {
 		return domain.SendResult{}, s.maybeDisconnectError(err)
 	}

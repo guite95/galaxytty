@@ -54,12 +54,12 @@ func Default() Config {
 	c.Samsung.DisplayWidth = 1080
 	c.Samsung.DisplayHeight = 1920
 	c.Samsung.ClipboardSyncDelay.Duration = 300 * time.Millisecond
-	c.Samsung.SendSettleDelay.Duration = 200 * time.Millisecond
+	c.Samsung.SendSettleDelay.Duration = 500 * time.Millisecond
 	c.Samsung.VerificationTimeout.Duration = 10 * time.Second
 	c.Samsung.Layout.ComposerX = 500
 	c.Samsung.Layout.ComposerY = 1800
 	c.Samsung.Layout.SendX = 1004
-	c.Samsung.Layout.SendY = 1273
+	c.Samsung.Layout.SendY = 955
 	return c
 }
 func Path() (string, error) {

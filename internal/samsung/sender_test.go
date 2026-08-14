@@ -13,14 +13,30 @@ import (
 )
 
 type senderDisplay struct {
-	calls *[]string
-	err   error
-	stops int
+	calls   *[]string
+	err     error
+	syncErr error
+	stops   int
 }
 
 func (d *senderDisplay) Start(context.Context) (domain.VirtualDisplay, error) {
 	*d.calls = append(*d.calls, "display.start")
 	return domain.VirtualDisplay{AndroidDisplayID: 18, Width: 1080, Height: 1920}, d.err
+}
+func (d *senderDisplay) SyncClipboard(context.Context) error {
+	*d.calls = append(*d.calls, "display.clipboard-sync")
+	return d.syncErr
+}
+
+func TestSenderStopsDisplayWhenScrcpyClipboardSyncFails(t *testing.T) {
+	sender, calls, display, _, _, _ := senderFixture(t)
+	display.syncErr = domain.ErrClipboardSync
+	if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); !errors.Is(err, domain.ErrClipboardSync) {
+		t.Fatalf("err=%v", err)
+	}
+	if display.stops != 1 || containsCall(*calls, "conversation.open") || containsCall(*calls, "paste") || containsCall(*calls, "send.tap") {
+		t.Fatalf("stops=%d calls=%q", display.stops, *calls)
+	}
 }
 func (d *senderDisplay) Stop(context.Context) error {
 	*d.calls = append(*d.calls, "display.stop")
@@ -30,9 +46,10 @@ func (d *senderDisplay) Stop(context.Context) error {
 func (d *senderDisplay) Healthy(context.Context) bool { return d.err == nil }
 
 type senderController struct {
-	calls  *[]string
-	failAt string
-	err    error
+	calls      *[]string
+	failAt     string
+	err        error
+	mainWasOff bool
 }
 
 func (c *senderController) call(name string) error {
@@ -45,8 +62,26 @@ func (c *senderController) call(name string) error {
 func (c *senderController) OpenConversation(context.Context, domain.VirtualDisplay, string) error {
 	return c.call("conversation.open")
 }
+func (c *senderController) OpenConversationWithBody(context.Context, domain.VirtualDisplay, string, string) error {
+	return c.call("conversation.open-body")
+}
+func (c *senderController) MainDisplayOff(context.Context) (bool, error) {
+	return c.mainWasOff, c.call("power.read")
+}
+func (c *senderController) WakeVirtualDisplay(context.Context, domain.VirtualDisplay) error {
+	return c.call("power.wake")
+}
+func (c *senderController) ShowHome(context.Context, domain.VirtualDisplay) error {
+	return c.call("display.home")
+}
+func (c *senderController) SleepMainDisplay(context.Context) error {
+	return c.call("power.restore")
+}
 func (c *senderController) FocusComposer(context.Context, domain.VirtualDisplay) error {
 	return c.call("composer.tap")
+}
+func (c *senderController) ClearComposer(context.Context, domain.VirtualDisplay) error {
+	return c.call("composer.clear")
 }
 func (c *senderController) Paste(context.Context, domain.VirtualDisplay) error {
 	return c.call("paste")
@@ -102,7 +137,7 @@ func senderFixture(t *testing.T) (*Sender, *[]string, *senderDisplay, *senderCon
 	t.Helper()
 	calls := []string{}
 	display := &senderDisplay{calls: &calls}
-	controller := &senderController{calls: &calls, err: errors.New("synthetic controller failure")}
+	controller := &senderController{calls: &calls, err: errors.New("synthetic controller failure"), mainWasOff: true}
 	clip := &senderClipboard{calls: &calls, old: "old clipboard", setError: map[int]error{}}
 	store := &senderStore{
 		calls:  &calls,
@@ -145,9 +180,30 @@ func TestSenderRunsVerifiedSequenceAndRestoresClipboard(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	want := []string{
-		"display.start", "conversation.open", "wait.ready", "composer.tap",
-		"clipboard.read", "clipboard.set", "wait.sync", "paste", "wait.settle",
-		"store.latest", "send.tap", "store.after", "clipboard.restore",
+		"display.start", "power.read", "power.wake", "display.home",
+		"clipboard.read", "clipboard.set", "display.clipboard-sync", "wait.sync",
+		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "wait.settle",
+		"store.latest", "send.tap", "store.after", "clipboard.restore", "power.restore",
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls=%q want=%q", *calls, want)
+	}
+}
+
+func TestSenderUsesVerifiedIntentBodyCompatibilityPath(t *testing.T) {
+	sender, calls, _, _, _, _ := senderFixture(t)
+	sender.config.UseIntentBody = true
+	result, err := sender.Send(context.Background(), "+82 10-1234-5678", "안녕하세요 😀")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != (domain.SendResult{MessageID: 101, ThreadID: 49}) {
+		t.Fatalf("result=%+v", result)
+	}
+	want := []string{
+		"display.start", "power.read", "power.wake", "conversation.open-body",
+		"wait.ready", "composer.tap", "wait.settle", "store.latest", "send.tap",
+		"store.after", "power.restore",
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls=%q want=%q", *calls, want)
@@ -162,19 +218,54 @@ func TestSenderStopsDisplayAfterControllerFailure(t *testing.T) {
 		t.Fatalf("err=%v stops=%d", err, display.stops)
 	}
 	want := []string{
-		"display.start", "conversation.open", "wait.ready", "composer.tap",
-		"clipboard.read", "clipboard.set", "wait.sync", "paste", "display.stop", "clipboard.restore",
+		"display.start", "power.read", "power.wake", "display.home",
+		"clipboard.read", "clipboard.set", "display.clipboard-sync", "wait.sync",
+		"conversation.open", "wait.ready", "composer.tap", "composer.clear", "paste", "display.stop", "clipboard.restore", "power.restore",
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls=%q want=%q", *calls, want)
 	}
 }
 
+func TestSenderStopsBeforePasteWhenComposerClearFails(t *testing.T) {
+	sender, calls, display, controller, _, _ := senderFixture(t)
+	controller.failAt = "composer.clear"
+	_, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀")
+	if !errors.Is(err, controller.err) || display.stops != 1 {
+		t.Fatalf("err=%v stops=%d", err, display.stops)
+	}
+	if containsCall(*calls, "paste") || containsCall(*calls, "send.tap") {
+		t.Fatalf("unexpected post-clear action: %q", *calls)
+	}
+}
+
+func TestSenderDoesNotChangePowerWhenMainDisplayWasOn(t *testing.T) {
+	sender, calls, _, controller, _, _ := senderFixture(t)
+	controller.mainWasOff = false
+	if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); err != nil {
+		t.Fatal(err)
+	}
+	if containsCall(*calls, "power.wake") || containsCall(*calls, "power.restore") {
+		t.Fatalf("unexpected power change: %q", *calls)
+	}
+}
+
+func TestSenderRestoresPowerAfterFailure(t *testing.T) {
+	sender, calls, _, controller, _, _ := senderFixture(t)
+	controller.failAt = "conversation.open"
+	if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); !errors.Is(err, controller.err) {
+		t.Fatalf("err=%v", err)
+	}
+	if !containsCall(*calls, "power.restore") {
+		t.Fatalf("main display power was not restored: %q", *calls)
+	}
+}
+
 func TestSenderStopsAtClipboardAndBaselineFailures(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		configure func(*senderClipboard, *senderStore)
-		wantLast  string
+		name              string
+		configure         func(*senderClipboard, *senderStore)
+		wantBeforeRestore string
 	}{
 		{"read", func(c *senderClipboard, _ *senderStore) { c.readErr = errors.New("read failed") }, "clipboard.read"},
 		{"set", func(c *senderClipboard, _ *senderStore) { c.setError[1] = errors.New("set failed") }, "clipboard.set"},
@@ -186,8 +277,11 @@ func TestSenderStopsAtClipboardAndBaselineFailures(t *testing.T) {
 			if _, err := sender.Send(context.Background(), "01012345678", "안녕하세요 😀"); err == nil {
 				t.Fatal("expected send error")
 			}
-			if got := (*calls)[len(*calls)-1]; got != tc.wantLast {
+			if got := (*calls)[len(*calls)-1]; got != "power.restore" {
 				t.Fatalf("last call=%q calls=%q", got, *calls)
+			}
+			if got := (*calls)[len(*calls)-2]; got != tc.wantBeforeRestore {
+				t.Fatalf("call before power restore=%q calls=%q", got, *calls)
 			}
 			for _, forbidden := range []string{"send.tap", "store.after"} {
 				if containsCall(*calls, forbidden) {

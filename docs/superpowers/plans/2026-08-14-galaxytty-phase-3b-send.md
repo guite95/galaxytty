@@ -8,6 +8,14 @@
 
 **Tech Stack:** Go 1.22+, `os/exec`, public adb and scrcpy 4.1 CLIs, macOS `pbcopy`/`pbpaste`, Bubble Tea, Android SMS Content Provider.
 
+**Live compatibility note (2026-08-14):** The implemented clipboard path is
+retained and unit-tested, but the current Android 16 / One UI 8.5 scrcpy virtual
+display does not expose the scrcpy-populated clipboard to Samsung Messages.
+The reference runtime therefore uses Android's documented `sms_body` `SENDTO`
+extra for exact Unicode composer prefill, then keeps the same Samsung tap and
+Provider verification path. No `input text`, helper APK, permission bypass, or
+direct SMS transport is used.
+
 **Spec:** `docs/superpowers/specs/2026-08-14-galaxytty-phase-3b-send-design.md`
 
 ## Global Constraints
@@ -47,10 +55,14 @@ Add table tests proving both stdout/stderr-style log prefixes parse `id=18`, unr
 []string{
     "-s", "synthetic-target",
     "--new-display=1080x1920",
+    "--display-ime-policy=local",
     "--start-app=com.samsung.android.messaging",
     "--record=/synthetic/record.mp4",
-    "--no-video-playback",
     "--no-audio",
+    "--keep-active",
+    "--window-width=1",
+    "--window-height=1",
+    "--window-borderless",
 }
 ```
 
@@ -152,7 +164,7 @@ With a recording fake device and display ID 18, assert these calls in order:
 []string{"am", "start", "--display", "18", "-a", "android.intent.action.SENDTO", "-d", "smsto:01012345678"}
 []string{"input", "-d", "18", "tap", "500", "1800"}
 []string{"input", "-d", "18", "keyevent", "279"}
-[]string{"input", "-d", "18", "tap", "1004", "1273"}
+[]string{"input", "-d", "18", "tap", "1004", "955"}
 ```
 
 Assert a failing device returns operation names but neither the synthetic phone

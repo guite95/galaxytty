@@ -9,7 +9,17 @@ import (
 	"github.com/galaxytty/galaxytty/internal/domain"
 )
 
-const pasteKeyCode = "279"
+const (
+	pasteKeyCode  = "279"
+	deleteKeyCode = "67"
+	ctrlKeyCode   = "113"
+	aKeyCode      = "29"
+)
+
+const (
+	wakeKeyCode  = "224"
+	sleepKeyCode = "223"
+)
 
 type Controller struct {
 	device domain.Device
@@ -30,7 +40,7 @@ func (c *Controller) OpenConversation(ctx context.Context, display domain.Virtua
 	if err := validateDisplay(display); err != nil {
 		return err
 	}
-	phone = strings.TrimSpace(phone)
+	phone = domain.NormalizePhone(phone)
 	if phone == "" {
 		return safeControllerError{kind: domain.ErrConversationOpen, cause: errors.New("recipient is required")}
 	}
@@ -42,6 +52,67 @@ func (c *Controller) OpenConversation(ctx context.Context, display domain.Virtua
 	)
 }
 
+func (c *Controller) OpenConversationWithBody(ctx context.Context, display domain.VirtualDisplay, phone, body string) error {
+	if err := validateDisplay(display); err != nil {
+		return err
+	}
+	phone = domain.NormalizePhone(phone)
+	if phone == "" || strings.TrimSpace(body) == "" {
+		return safeControllerError{kind: domain.ErrConversationOpen, cause: errors.New("recipient and message body are required")}
+	}
+	quotedBody, err := quoteRemoteShellArg(body)
+	if err != nil {
+		return safeControllerError{kind: domain.ErrConversationOpen, cause: err}
+	}
+	return c.run(ctx, domain.ErrConversationOpen,
+		"am", "start",
+		"--display", displayID(display),
+		"-a", "android.intent.action.SENDTO",
+		"-d", "smsto:"+phone,
+		"--es", "sms_body", quotedBody,
+	)
+}
+
+func (c *Controller) MainDisplayOff(ctx context.Context) (bool, error) {
+	output, err := c.device.Shell(ctx, "dumpsys", "display")
+	if err != nil {
+		return false, safeControllerError{kind: domain.ErrDisplayPower, cause: err}
+	}
+	lower := strings.ToLower(strings.TrimSpace(string(output)))
+	if strings.HasPrefix(lower, "error:") || strings.Contains(lower, "exception") {
+		return false, safeControllerError{kind: domain.ErrDisplayPower, cause: errors.New("Android command reported an error")}
+	}
+	off, ok := parseDisplayZeroOff(string(output))
+	if !ok {
+		return false, safeControllerError{kind: domain.ErrDisplayPower, cause: errors.New("main display state was not found")}
+	}
+	return off, nil
+}
+
+func (c *Controller) WakeVirtualDisplay(ctx context.Context, display domain.VirtualDisplay) error {
+	if err := validateDisplay(display); err != nil {
+		return err
+	}
+	return c.run(ctx, domain.ErrDisplayPower,
+		"input", "-d", displayID(display), "keyevent", wakeKeyCode,
+	)
+}
+
+func (c *Controller) ShowHome(ctx context.Context, display domain.VirtualDisplay) error {
+	if err := validateDisplay(display); err != nil {
+		return err
+	}
+	return c.run(ctx, domain.ErrClipboardSync,
+		"input", "-d", displayID(display), "keyevent", "3",
+	)
+}
+
+func (c *Controller) SleepMainDisplay(ctx context.Context) error {
+	return c.run(ctx, domain.ErrDisplayPower,
+		"input", "-d", "0", "keyevent", sleepKeyCode,
+	)
+}
+
 func (c *Controller) FocusComposer(ctx context.Context, display domain.VirtualDisplay) error {
 	if err := validateDisplay(display); err != nil {
 		return err
@@ -49,6 +120,20 @@ func (c *Controller) FocusComposer(ctx context.Context, display domain.VirtualDi
 	return c.run(ctx, domain.ErrComposerTap,
 		"input", "-d", displayID(display), "tap",
 		strconv.Itoa(c.layout.Composer.X), strconv.Itoa(c.layout.Composer.Y),
+	)
+}
+
+func (c *Controller) ClearComposer(ctx context.Context, display domain.VirtualDisplay) error {
+	if err := validateDisplay(display); err != nil {
+		return err
+	}
+	if err := c.run(ctx, domain.ErrComposerClear,
+		"input", "-d", displayID(display), "keycombination", ctrlKeyCode, aKeyCode,
+	); err != nil {
+		return err
+	}
+	return c.run(ctx, domain.ErrComposerClear,
+		"input", "-d", displayID(display), "keyevent", deleteKeyCode,
 	)
 }
 
@@ -92,6 +177,37 @@ func validateDisplay(display domain.VirtualDisplay) error {
 
 func displayID(display domain.VirtualDisplay) string {
 	return strconv.FormatInt(display.AndroidDisplayID, 10)
+}
+
+func quoteRemoteShellArg(value string) (string, error) {
+	if strings.IndexByte(value, 0) >= 0 {
+		return "", errors.New("NUL bytes are not supported")
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'", nil
+}
+
+func parseDisplayZeroOff(output string) (off, ok bool) {
+	inDisplayZero := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Display Id=") {
+			inDisplayZero = line == "Display Id=0"
+			continue
+		}
+		if !inDisplayZero || !strings.HasPrefix(line, "Display State=") {
+			continue
+		}
+		state := strings.TrimSpace(strings.TrimPrefix(line, "Display State="))
+		switch state {
+		case "OFF", "DOZE", "DOZE_SUSPEND":
+			return true, true
+		case "ON", "VR", "ON_SUSPEND":
+			return false, true
+		default:
+			return false, false
+		}
+	}
+	return false, false
 }
 
 type safeControllerError struct {

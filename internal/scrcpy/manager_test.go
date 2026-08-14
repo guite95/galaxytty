@@ -27,13 +27,30 @@ func TestBuildArgs(t *testing.T) {
 	want := []string{
 		"-s", "synthetic-target",
 		"--new-display=1080x1920",
+		"--display-ime-policy=local",
 		"--start-app=com.samsung.android.messaging",
 		"--record=/synthetic/record.mp4",
-		"--no-video-playback",
 		"--no-audio",
+		"--keep-active",
+		"--window-title=GalaxyTTY-record.mp4",
+		"--window-width=1",
+		"--window-height=1",
+		"--window-borderless",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("BuildArgs() = %#v; want %#v", got, want)
+	}
+}
+
+func TestClipboardShortcutUsesPhysicalVKeyAcrossKeyboardLayouts(t *testing.T) {
+	script := clipboardShortcutScript(4242)
+	for _, want := range []string{"unix id is 4242", "key code 9 using command down"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script missing %q: %s", want, script)
+		}
+	}
+	if strings.Contains(script, `keystroke "v"`) {
+		t.Fatalf("layout-dependent keystroke returned: %s", script)
 	}
 }
 
@@ -63,20 +80,97 @@ type fakeProcess struct {
 	signalErr error
 	signal    func()
 	kill      func()
+	pid       int
 }
 
 func newFakeProcess() *fakeProcess {
 	reader, writer := io.Pipe()
-	return &fakeProcess{logs: reader, writer: writer, wait: make(chan error, 1)}
+	return &fakeProcess{logs: reader, writer: writer, wait: make(chan error, 1), pid: 4242}
 }
 
 func (p *fakeProcess) LogReader() io.Reader { return p.logs }
+func (p *fakeProcess) PID() int             { return p.pid }
 
 func (p *fakeProcess) Wait() error {
 	p.mu.Lock()
 	p.waitCalls++
 	p.mu.Unlock()
 	return <-p.wait
+}
+
+func TestManagerSyncsClipboardThroughHealthyScrcpyClient(t *testing.T) {
+	fake := newFakeProcess()
+	fake.signal = func() { fake.complete(nil) }
+	manager, _, _ := newTestManager(t, fake)
+	manager.startProcess = func(context.Context, string, []string) (process, error) {
+		go fake.writeLog("[server] INFO: New display: 1080x1920/344 (id=18)")
+		return fake, nil
+	}
+	gotPID := 0
+	manager.syncClipboard = func(_ context.Context, pid int) error {
+		gotPID = pid
+		return nil
+	}
+	if _, err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SyncClipboard(context.Background()); err != nil || gotPID != 4242 {
+		t.Fatalf("pid=%d err=%v", gotPID, err)
+	}
+	if err := manager.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagerRejectsClipboardSyncWithoutHealthySession(t *testing.T) {
+	manager, _, _ := newTestManager(t, newFakeProcess())
+	if err := manager.SyncClipboard(context.Background()); !errors.Is(err, domain.ErrClipboardSync) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestManagerRejectsClipboardSyncAfterProcessExit(t *testing.T) {
+	fake := newFakeProcess()
+	manager, _, _ := newTestManager(t, fake)
+	manager.startProcess = func(context.Context, string, []string) (process, error) {
+		go fake.writeLog("[server] INFO: New display: 1080x1920/344 (id=18)")
+		return fake, nil
+	}
+	if _, err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fake.complete(errors.New("synthetic exit"))
+	select {
+	case <-manager.session.done:
+	case <-time.After(time.Second):
+		t.Fatal("process exit was not observed")
+	}
+	err := manager.SyncClipboard(context.Background())
+	if !errors.Is(err, domain.ErrClipboardSync) || !errors.Is(err, domain.ErrScrcpyExited) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestManagerPreservesClipboardSyncCause(t *testing.T) {
+	fake := newFakeProcess()
+	fake.signal = func() { fake.complete(nil) }
+	manager, _, _ := newTestManager(t, fake)
+	manager.startProcess = func(context.Context, string, []string) (process, error) {
+		go fake.writeLog("[server] INFO: New display: 1080x1920/344 (id=18)")
+		return fake, nil
+	}
+	cause := errors.New("synthetic automation failure")
+	manager.syncClipboard = func(context.Context, int) error { return cause }
+	if _, err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err := manager.SyncClipboard(context.Background())
+	if !errors.Is(err, domain.ErrClipboardSync) || !errors.Is(err, cause) {
+		t.Fatalf("err=%v", err)
+	}
+	if err := manager.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (p *fakeProcess) Signal(os.Signal) error {

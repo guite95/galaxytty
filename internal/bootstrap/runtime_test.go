@@ -31,8 +31,10 @@ func TestMockBuildsApplicationWithThreadAwareSending(t *testing.T) {
 }
 
 type syntheticADB struct {
-	mu   sync.Mutex
-	sent bool
+	mu     sync.Mutex
+	sent   bool
+	wakes  int
+	sleeps int
 }
 
 func (*syntheticADB) Devices(context.Context) ([]adb.Device, error) {
@@ -53,6 +55,8 @@ func (b *syntheticADB) Shell(_ context.Context, target string, args ...string) (
 		return []byte("HARDWARE123\n"), nil
 	case "pm path com.samsung.android.messaging":
 		return []byte("package:/synthetic/base.apk\n"), nil
+	case "dumpsys display":
+		return []byte("Display Id=0\n  Display State=OFF\nDisplay Id=18\n  Display State=ON\n"), nil
 	}
 	if len(args) > 0 && args[0] == "content" {
 		projection := argumentAfter(args, "--projection")
@@ -68,9 +72,21 @@ func (b *syntheticADB) Shell(_ context.Context, target string, args ...string) (
 		}
 		return []byte("No result found.\n"), nil
 	}
-	if len(args) >= 6 && args[0] == "input" && args[3] == "tap" && args[4] == "1004" && args[5] == "1273" {
+	if len(args) >= 6 && args[0] == "input" && args[3] == "tap" && args[4] == "1004" && args[5] == "955" {
 		b.mu.Lock()
 		b.sent = true
+		b.mu.Unlock()
+		return nil, nil
+	}
+	if key == "input -d 18 keyevent 224" {
+		b.mu.Lock()
+		b.wakes++
+		b.mu.Unlock()
+		return nil, nil
+	}
+	if key == "input -d 0 keyevent 223" {
+		b.mu.Lock()
+		b.sleeps++
 		b.mu.Unlock()
 		return nil, nil
 	}
@@ -89,8 +105,9 @@ func (d *lazyDisplay) Start(context.Context) (domain.VirtualDisplay, error) {
 	d.starts++
 	return domain.VirtualDisplay{AndroidDisplayID: 18, Width: 1080, Height: 1920}, nil
 }
-func (d *lazyDisplay) Stop(context.Context) error   { d.stops++; return nil }
-func (d *lazyDisplay) Healthy(context.Context) bool { return d.starts > d.stops }
+func (d *lazyDisplay) SyncClipboard(context.Context) error { return nil }
+func (d *lazyDisplay) Stop(context.Context) error          { d.stops++; return nil }
+func (d *lazyDisplay) Healthy(context.Context) bool        { return d.starts > d.stops }
 
 type runtimeClipboard struct{ value string }
 
@@ -111,6 +128,7 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 				SendSettleDelay:        time.Nanosecond,
 				VerificationTimeout:    time.Second,
 				VerificationInterval:   time.Millisecond,
+				UseIntentBody:          true,
 			}
 		},
 	})
@@ -130,6 +148,12 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 	}
 	if display.starts != 1 {
 		t.Fatalf("display starts=%d", display.starts)
+	}
+	backend.mu.Lock()
+	wakes, sleeps := backend.wakes, backend.sleeps
+	backend.mu.Unlock()
+	if wakes != 1 || sleeps != 1 {
+		t.Fatalf("power lifecycle wakes=%d sleeps=%d", wakes, sleeps)
 	}
 	if messages, err := runtime.Service.Poll(context.Background(), 0); err != nil || len(messages) != 1 || messages[0].Direction != domain.DirectionOutgoing {
 		t.Fatalf("messages=%+v err=%v", messages, err)

@@ -17,10 +17,10 @@ func write(t *testing.T, s string) string {
 }
 func TestDefaultsAndMissing(t *testing.T) {
 	c, e := Load(filepath.Join(t.TempDir(), "missing"))
-	if e != nil || !c.Connection.PreferUSB || c.Polling.Interval.Duration != time.Second || !c.Notifications.Enabled || c.Notifications.ShowWhenFocused || c.Samsung.Layout.SendX != 1004 {
+	if e != nil || !c.Connection.PreferUSB || c.Polling.Interval.Duration != time.Second || !c.Notifications.Enabled || c.Notifications.ShowWhenFocused || c.Samsung.Layout.SendX != 1004 || c.Samsung.Layout.SendY != 955 {
 		t.Fatal(c, e)
 	}
-	if c.Samsung.ClipboardSyncDelay.Duration != 300*time.Millisecond || c.Samsung.SendSettleDelay.Duration != 200*time.Millisecond || c.Samsung.VerificationTimeout.Duration != 10*time.Second {
+	if c.Samsung.ClipboardSyncDelay.Duration != 300*time.Millisecond || c.Samsung.SendSettleDelay.Duration != 500*time.Millisecond || c.Samsung.VerificationTimeout.Duration != 10*time.Second {
 		t.Fatalf("Samsung timings=%+v", c.Samsung)
 	}
 }

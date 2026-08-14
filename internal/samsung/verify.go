@@ -26,6 +26,12 @@ func verifySent(
 	for {
 		messages, err := store.MessagesAfter(verifyCtx, baseline)
 		if err != nil {
+			if ctx.Err() != nil {
+				return domain.SendResult{}, ctx.Err()
+			}
+			if verifyCtx.Err() != nil {
+				return domain.SendResult{}, domain.ErrSendVerificationTimeout
+			}
 			return domain.SendResult{}, fmt.Errorf("verify sent message: %w", err)
 		}
 		for _, message := range messages {

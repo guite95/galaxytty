@@ -167,22 +167,26 @@ func TestDoctorKeepsReadReadyWhenSendToolsAreMissing(t *testing.T) {
 	}
 }
 
-func TestDoctorMissingClipboardBlocksOnlySendReadiness(t *testing.T) {
-	backend := readyADB(domain.ConnectionUSB)
-	report := (Service{
-		ADB: backend,
-		InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
-			return scrcpy.VersionInfo{Path: "/synthetic/scrcpy", Version: "4.1"}, nil
-		},
-		LookPath: func(name string) (string, error) {
-			if name == "pbpaste" {
-				return "", errors.New("missing")
+func TestDoctorMissingClipboardKeepsIntentBodySendReady(t *testing.T) {
+	for _, missing := range []string{"pbcopy", "pbpaste", "osascript"} {
+		t.Run(missing, func(t *testing.T) {
+			backend := readyADB(domain.ConnectionUSB)
+			report := (Service{
+				ADB: backend,
+				InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
+					return scrcpy.VersionInfo{Path: "/synthetic/scrcpy", Version: "4.1"}, nil
+				},
+				LookPath: func(name string) (string, error) {
+					if name == missing {
+						return "", errors.New("missing")
+					}
+					return "/synthetic/" + name, nil
+				},
+			}).Run(context.Background(), config.Default(), "")
+			if !report.ReadReady || !report.SendReady || findCheck(report, "macOS clipboard compatibility").State != Info || !strings.Contains(report.Summary, "Send: ready") {
+				t.Fatalf("report=%+v", report)
 			}
-			return "/synthetic/" + name, nil
-		},
-	}).Run(context.Background(), config.Default(), "")
-	if !report.ReadReady || report.SendReady || findCheck(report, "macOS clipboard").State != Fail || !strings.Contains(report.Summary, "Send: not ready") {
-		t.Fatalf("report=%+v", report)
+		})
 	}
 }
 

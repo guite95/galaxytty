@@ -13,6 +13,7 @@ import (
 type verificationStore struct {
 	batches [][]domain.Message
 	err     error
+	block   bool
 	calls   int
 }
 
@@ -23,8 +24,12 @@ func (s *verificationStore) Messages(context.Context, int64, domain.MessageQuery
 	return nil, nil
 }
 func (s *verificationStore) LatestMessageID(context.Context) (int64, error) { return 0, nil }
-func (s *verificationStore) MessagesAfter(context.Context, int64) ([]domain.Message, error) {
+func (s *verificationStore) MessagesAfter(ctx context.Context, _ int64) ([]domain.Message, error) {
 	s.calls++
+	if s.block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -71,6 +76,13 @@ func TestVerifySentTimesOutWithoutLeakingRecipientOrBody(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), recipient) || strings.Contains(err.Error(), body) {
 		t.Fatalf("verification error leaked private values: %q", err)
+	}
+}
+
+func TestVerifySentMapsQueryDeadlineToVerificationTimeout(t *testing.T) {
+	_, err := verifySent(context.Background(), &verificationStore{block: true}, 100, "01012345678", "body", 5*time.Millisecond, time.Millisecond)
+	if !errors.Is(err, domain.ErrSendVerificationTimeout) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

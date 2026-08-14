@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 	"time"
@@ -72,8 +71,5 @@ func TestRealGalaxyReadPath(t *testing.T) {
 		if message.ID < latestID || message.Type != domain.MessageSMS {
 			t.Fatal("invalid incremental SMS mapping")
 		}
-	}
-	if _, err := runtime.Service.SendToAddress(ctx, "synthetic", "synthetic"); !errors.Is(err, domain.ErrSendingNotImplemented) {
-		t.Fatalf("send err=%v", err)
 	}
 }

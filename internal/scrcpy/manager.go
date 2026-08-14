@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,10 +30,11 @@ type Manager struct {
 	starting       chan struct{}
 	startingCancel context.CancelFunc
 
-	lookupPath   func(string) (string, error)
-	createTemp   func() (*os.File, error)
-	startProcess func(context.Context, string, []string) (process, error)
-	stopTimeout  time.Duration
+	lookupPath    func(string) (string, error)
+	createTemp    func() (*os.File, error)
+	startProcess  func(context.Context, string, []string) (process, error)
+	syncClipboard func(context.Context, int) error
+	stopTimeout   time.Duration
 }
 
 const defaultStopTimeout = 2 * time.Second
@@ -45,6 +48,7 @@ type displaySession struct {
 
 type process interface {
 	LogReader() io.Reader
+	PID() int
 	Wait() error
 	Signal(os.Signal) error
 	Kill() error
@@ -57,6 +61,7 @@ type commandProcess struct {
 }
 
 func (p *commandProcess) LogReader() io.Reader { return p.logs }
+func (p *commandProcess) PID() int             { return p.cmd.Process.Pid }
 
 func (p *commandProcess) Wait() error {
 	err := p.cmd.Wait()
@@ -71,10 +76,15 @@ func BuildArgs(cfg Config, recordPath string) []string {
 	return []string{
 		"-s", cfg.Target,
 		fmt.Sprintf("--new-display=%dx%d", cfg.Width, cfg.Height),
+		"--display-ime-policy=local",
 		"--start-app=" + cfg.Package,
 		"--record=" + recordPath,
-		"--no-video-playback",
 		"--no-audio",
+		"--keep-active",
+		"--window-title=GalaxyTTY-" + filepath.Base(recordPath),
+		"--window-width=1",
+		"--window-height=1",
+		"--window-borderless",
 	}
 }
 
@@ -86,12 +96,31 @@ func NewManager(cfg Config) (*Manager, error) {
 		cfg.Path = "scrcpy"
 	}
 	return &Manager{
-		config:       cfg,
-		lookupPath:   exec.LookPath,
-		createTemp:   createRecordFile,
-		startProcess: startCommand,
-		stopTimeout:  defaultStopTimeout,
+		config:        cfg,
+		lookupPath:    exec.LookPath,
+		createTemp:    createRecordFile,
+		startProcess:  startCommand,
+		syncClipboard: syncClipboardShortcut,
+		stopTimeout:   defaultStopTimeout,
 	}, nil
+}
+
+func (m *Manager) SyncClipboard(ctx context.Context) error {
+	m.mu.Lock()
+	session := m.session
+	m.mu.Unlock()
+	if session == nil {
+		return fmt.Errorf("%w", domain.ErrClipboardSync)
+	}
+	select {
+	case <-session.done:
+		return fmt.Errorf("%w: %w", domain.ErrClipboardSync, domain.ErrScrcpyExited)
+	default:
+	}
+	if err := m.syncClipboard(ctx, session.process.PID()); err != nil {
+		return fmt.Errorf("%w: %w", domain.ErrClipboardSync, err)
+	}
+	return nil
 }
 
 func (m *Manager) Start(ctx context.Context) (domain.VirtualDisplay, error) {
@@ -336,6 +365,24 @@ func startCommand(_ context.Context, path string, args []string) (process, error
 		return nil, err
 	}
 	return &commandProcess{cmd: cmd, logs: reader, writer: writer}, nil
+}
+
+func syncClipboardShortcut(ctx context.Context, pid int) error {
+	return exec.CommandContext(ctx, "osascript", "-e", clipboardShortcutScript(pid)).Run()
+}
+
+func clipboardShortcutScript(pid int) string {
+	return `tell application "System Events"
+set previousProcess to first application process whose frontmost is true
+set targetProcess to first application process whose unix id is ` + strconv.Itoa(pid) + `
+set frontmost of targetProcess to true
+delay 0.05
+key code 9 using command down
+delay 0.05
+try
+set frontmost of previousProcess to true
+end try
+end tell`
 }
 
 var _ domain.VirtualDisplayManager = (*Manager)(nil)
