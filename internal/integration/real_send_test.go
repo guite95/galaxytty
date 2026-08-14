@@ -91,7 +91,7 @@ func TestRealSamsungSend(t *testing.T) {
 	store := provider.NewStore(target)
 	baseline, err := store.LatestMessageID(ctx)
 	if err != nil {
-		t.Fatal("could not establish provider baseline")
+		t.Fatalf("could not establish provider baseline: %s", safeProviderDiagnostic(err))
 	}
 	beforeState := readMainDisplayState(ctx, target)
 	beforeRecords := recordingSnapshot(t)
@@ -154,7 +154,7 @@ func TestRealSamsungRCSSend(t *testing.T) {
 	store := provider.NewStore(target)
 	baseline, err := store.LatestMessageID(ctx)
 	if err != nil {
-		t.Fatal("could not establish RCS observation baseline")
+		t.Fatalf("could not establish RCS observation baseline: %s", safeProviderDiagnostic(err))
 	}
 	beforeState := readMainDisplayState(ctx, target)
 	beforeRecords := recordingSnapshot(t)
@@ -219,7 +219,7 @@ func TestRealSamsungMMSTextSend(t *testing.T) {
 	store := provider.NewStore(target)
 	baseline, err := store.LatestMMSMessageID(ctx)
 	if err != nil {
-		t.Fatal("could not establish MMS provider baseline")
+		t.Fatalf("could not establish MMS provider baseline: %s", safeProviderDiagnostic(err))
 	}
 	beforeState := readMainDisplayState(ctx, target)
 	beforeRecords := recordingSnapshot(t)
@@ -415,6 +415,27 @@ func discoverTarget(t *testing.T, ctx context.Context, cfg config.Config) *adb.T
 		t.Fatal(err)
 	}
 	return target
+}
+
+func safeProviderDiagnostic(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return context.Canceled.Error()
+	case errors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded.Error()
+	case errors.Is(err, domain.ErrUnauthorized):
+		return domain.ErrUnauthorized.Error()
+	case errors.Is(err, domain.ErrOffline):
+		return domain.ErrOffline.Error()
+	case errors.Is(err, domain.ErrNoDevices):
+		return domain.ErrNoDevices.Error()
+	case errors.Is(err, domain.ErrProviderPermissionDenied):
+		return domain.ErrProviderPermissionDenied.Error()
+	case errors.Is(err, domain.ErrProviderOutput):
+		return domain.ErrProviderOutput.Error()
+	default:
+		return "provider query failed"
+	}
 }
 
 type mainDisplayState struct {
