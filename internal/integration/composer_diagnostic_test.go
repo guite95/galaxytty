@@ -23,7 +23,7 @@ import (
 
 const composerDiagnosticDelay = 500 * time.Millisecond
 
-func TestRealSamsungComposerDiagnostic(t *testing.T) {
+func TestRealSamsungVideoPlaybackComposerDiagnostic(t *testing.T) {
 	if os.Getenv("GALAXYTTY_ENABLE_COMPOSER_DIAGNOSTIC") != "1" || strings.TrimSpace(os.Getenv("GALAXYTTY_DIAGNOSTIC_RECIPIENT")) == "" {
 		t.Skip("explicit non-sending composer diagnostic opt-in and recipient required")
 	}
@@ -47,16 +47,16 @@ func TestRealSamsungComposerDiagnostic(t *testing.T) {
 
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
 	variants := []struct {
-		name       string
-		keepActive bool
-		body       string
+		name          string
+		videoPlayback bool
+		body          string
 	}{
 		{name: "CURRENT", body: "GalaxyTTY DIAGNOSTIC CURRENT 한글 😀 " + timestamp},
-		{name: "KEEP_ACTIVE", keepActive: true, body: "GalaxyTTY DIAGNOSTIC KEEP ACTIVE 한글 😀 " + timestamp},
+		{name: "PLAYBACK", videoPlayback: true, body: "GalaxyTTY DIAGNOSTIC PLAYBACK 한글 😀 " + timestamp},
 	}
 	results := make([]composerDiagnosticResult, 0, len(variants))
 	for _, variant := range variants {
-		result, err := runComposerDiagnosticVariant(ctx, target, cfg, recipient, variant.body, variant.keepActive)
+		result, err := runComposerDiagnosticVariant(ctx, target, cfg, recipient, variant.body, variant.videoPlayback)
 		if err != nil {
 			t.Fatalf("%s composer diagnostic failed without a send action: %s", variant.name, safeComposerDiagnosticError(err))
 		}
@@ -88,7 +88,7 @@ func TestRealSamsungComposerDiagnostic(t *testing.T) {
 	assertNoNewRecordings(t, recordingsBefore)
 	assertMainDisplayStatePreserved(t, mainBefore, readMainDisplayState(ctx, target))
 	t.Log("ACTUAL_MESSAGE_CREATED=false")
-	t.Logf("KEEP_ACTIVE_DIFFERENCE=%s", classifyKeepActiveDifference(results[0], results[1]))
+	t.Logf("VIDEO_PLAYBACK_DIFFERENCE=%s", classifyVideoPlaybackDifference(results[0], results[1]))
 }
 
 type composerDiagnosticResult struct {
@@ -110,7 +110,7 @@ func runComposerDiagnosticVariant(
 	target *adb.Target,
 	cfg config.Config,
 	recipient, body string,
-	keepActive bool,
+	videoPlayback bool,
 ) (result composerDiagnosticResult, err error) {
 	mainBefore := readMainDisplayState(ctx, target)
 	manager, err := scrcpy.NewManager(scrcpy.Config{
@@ -118,7 +118,7 @@ func runComposerDiagnosticVariant(
 		Width: cfg.Samsung.DisplayWidth, Height: cfg.Samsung.DisplayHeight,
 		StartupTimeout: 15 * time.Second,
 		InputMode:      domain.TextInputIntentBody,
-		KeepActive:     keepActive,
+		VideoPlayback:  videoPlayback,
 	})
 	if err != nil {
 		return result, err
@@ -255,16 +255,16 @@ func logComposerDiagnosticResult(t *testing.T, mode string, result composerDiagn
 	)
 }
 
-func classifyKeepActiveDifference(current, keepActive composerDiagnosticResult) string {
+func classifyVideoPlaybackDifference(current, playback composerDiagnosticResult) string {
 	currentReady := current.afterFocus.composerReady()
-	keepActiveReady := keepActive.afterFocus.composerReady()
+	playbackReady := playback.afterFocus.composerReady()
 	switch {
-	case !currentReady && keepActiveReady:
-		return "KEEP_ACTIVE_IMPROVED_READINESS"
-	case currentReady && keepActiveReady:
+	case !currentReady && playbackReady:
+		return "PLAYBACK_IMPROVED_READINESS"
+	case currentReady && playbackReady:
 		return "BOTH_READY"
-	case currentReady && !keepActiveReady:
-		return "KEEP_ACTIVE_REDUCED_READINESS"
+	case currentReady && !playbackReady:
+		return "PLAYBACK_REDUCED_READINESS"
 	default:
 		return "BOTH_NOT_READY"
 	}

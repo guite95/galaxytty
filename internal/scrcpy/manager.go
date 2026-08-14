@@ -22,6 +22,7 @@ type Config struct {
 	StartupTimeout        time.Duration
 	InputMode             domain.TextInputMode
 	KeepActive            bool
+	VideoPlayback         bool
 }
 
 type Manager struct {
@@ -94,7 +95,10 @@ func BuildArgs(cfg Config, recordPath string) []string {
 			"--window-borderless",
 		)
 	}
-	return append(args, "--no-video-playback")
+	if !cfg.VideoPlayback {
+		args = append(args, "--no-video-playback")
+	}
+	return args
 }
 
 func NewManager(cfg Config) (*Manager, error) {

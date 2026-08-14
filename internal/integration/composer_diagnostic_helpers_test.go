@@ -181,6 +181,21 @@ func TestDiagnosticMarkerCreatedRequiresExactOutgoingRecipientAndBody(t *testing
 	}
 }
 
+func TestClassifyVideoPlaybackDifferenceRequiresReadyPlaybackVariant(t *testing.T) {
+	current := composerDiagnosticResult{afterFocus: composerDiagnosticState{displayState: "OFF"}}
+	playback := composerDiagnosticResult{afterFocus: composerDiagnosticState{
+		displayState:              "ON",
+		samsungTaskOnVD:           true,
+		samsungResumedOnVD:        true,
+		currentFocusedDisplay:     true,
+		currentFocusedApplication: true,
+		currentFocusedWindow:      true,
+	}}
+	if got := classifyVideoPlaybackDifference(current, playback); got != "PLAYBACK_IMPROVED_READINESS" {
+		t.Fatalf("difference=%q", got)
+	}
+}
+
 type recordingDiagnosticController struct {
 	actions []string
 }
