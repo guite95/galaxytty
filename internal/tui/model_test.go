@@ -60,6 +60,34 @@ func TestSelectResizeAndEsc(t *testing.T) {
 		t.Fatal("not back")
 	}
 }
+
+func TestConversationListKeepsJKQAsComposerInput(t *testing.T) {
+	for _, input := range []string{"j", "k", "/search j k q"} {
+		m, _ := fixture(t)
+		m.cursor = 1
+		m = typeText(m, input)
+		if got := m.composer.Value(); got != input {
+			t.Fatalf("input=%q composer=%q", input, got)
+		}
+		if m.cursor != 1 {
+			t.Fatalf("input=%q moved conversation cursor to %d", input, m.cursor)
+		}
+	}
+}
+
+func TestConversationListUsesOnlyArrowNavigation(t *testing.T) {
+	m, _ := fixture(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.cursor != 1 || m.composer.Value() != "" {
+		t.Fatalf("down cursor=%d composer=%q", m.cursor, m.composer.Value())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	if m.cursor != 0 || m.composer.Value() != "" {
+		t.Fatalf("up cursor=%d composer=%q", m.cursor, m.composer.Value())
+	}
+}
 func TestComposerSend(t *testing.T) {
 	m, b := fixture(t)
 	m = open(t, m)
@@ -292,6 +320,170 @@ func TestChatRendersLatestVisibleMessageWindow(t *testing.T) {
 	if lines := strings.Count(rendered, "\n") + 1; lines > 10 {
 		t.Fatalf("rendered lines=%d", lines)
 	}
+}
+
+func scrollingModel(t *testing.T, count int) Model {
+	t.Helper()
+	model, _ := fixture(t)
+	model.screen = chatScreen
+	model.height = 12
+	model.messages = make([]domain.Message, count)
+	for index := range model.messages {
+		model.messages[index] = domain.Message{
+			ID:        int64(index + 1),
+			ThreadID:  1,
+			Body:      fmt.Sprintf("Message %03d", index+1),
+			Direction: domain.DirectionIncoming,
+		}
+	}
+	return model
+}
+
+func TestChatPageKeysScrollOlderNewerAndLatest(t *testing.T) {
+	model := scrollingModel(t, 20)
+	latest := model.renderChat(28, 6)
+	if !strings.Contains(latest, "Message 020") || strings.Contains(latest, "Message 001") {
+		t.Fatalf("latest viewport=%q", latest)
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(Model)
+	older := model.renderChat(28, 6)
+	if !strings.Contains(older, "Message 011") || strings.Contains(older, "Message 020") {
+		t.Fatalf("older viewport=%q", older)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	model = updated.(Model)
+	if got := model.renderChat(28, 6); got != latest {
+		t.Fatalf("page down viewport=%q want=%q", got, latest)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if got := updated.(Model).renderChat(28, 6); got != latest {
+		t.Fatalf("end viewport=%q want=%q", got, latest)
+	}
+}
+
+type recordingMessagesAPI struct {
+	app.API
+	queries []domain.MessageQuery
+	older   []domain.Message
+}
+
+func (s *recordingMessagesAPI) Messages(ctx context.Context, id int64, query domain.MessageQuery) ([]domain.Message, error) {
+	s.queries = append(s.queries, query)
+	if query.BeforeID > 0 {
+		return append([]domain.Message(nil), s.older...), nil
+	}
+	return s.API.Messages(ctx, id, query)
+}
+
+func TestChatLoadsOlderPageWithoutMovingVisualAnchor(t *testing.T) {
+	model := scrollingModel(t, 200)
+	for index := range model.messages {
+		model.messages[index].ID += 100
+		model.messages[index].Body = fmt.Sprintf("Message %03d", index+101)
+	}
+	older := make([]domain.Message, 100)
+	for index := range older {
+		older[index] = domain.Message{ID: int64(index + 1), ThreadID: 1, Body: fmt.Sprintf("Message %03d", index+1), Direction: domain.DirectionIncoming}
+	}
+	recorder := &recordingMessagesAPI{API: model.service, older: older}
+	model.service = recorder
+	updated, _ := model.Update(messagesMsg{items: model.messages})
+	model = updated.(Model)
+
+	for range 39 {
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		model = updated.(Model)
+	}
+	anchored := model.renderChat(28, 6)
+	if !strings.Contains(anchored, "Message 101") {
+		t.Fatalf("top loaded viewport=%q", anchored)
+	}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("missing older page load command")
+	}
+	updated, _ = model.Update(cmd())
+	model = updated.(Model)
+	if len(recorder.queries) != 1 || recorder.queries[0] != (domain.MessageQuery{BeforeID: 101, Limit: 200}) {
+		t.Fatalf("queries=%+v", recorder.queries)
+	}
+	if got := model.renderChat(28, 6); got != anchored {
+		t.Fatalf("prepend moved anchor: got=%q want=%q", got, anchored)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if got := updated.(Model).renderChat(28, 6); !strings.Contains(got, "Message 096") || strings.Contains(got, "Message 101") {
+		t.Fatalf("new older page viewport=%q", got)
+	}
+}
+
+func TestPollingFollowsBottomButPreservesScrolledViewport(t *testing.T) {
+	bottom := scrollingModel(t, 20)
+	updated, _ := bottom.Update(pollMsg{items: []domain.Message{{ID: 21, ThreadID: 1, Body: "Message 021", Direction: domain.DirectionIncoming}}})
+	bottom = updated.(Model)
+	if got := bottom.renderChat(28, 6); !strings.Contains(got, "Message 021") {
+		t.Fatalf("bottom did not follow new message: %q", got)
+	}
+
+	scrolled := scrollingModel(t, 20)
+	updated, _ = scrolled.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	scrolled = updated.(Model)
+	before := scrolled.renderChat(28, 6)
+	updated, _ = scrolled.Update(pollMsg{items: []domain.Message{
+		{ID: 21, ThreadID: 1, Body: "Message 021", Direction: domain.DirectionIncoming},
+		{ID: 21, ThreadID: 1, Body: "Message 021", Direction: domain.DirectionIncoming},
+		{ID: 22, ThreadID: 2, Body: "other thread", Direction: domain.DirectionIncoming},
+	}})
+	scrolled = updated.(Model)
+	if got := scrolled.renderChat(28, 6); got != before {
+		t.Fatalf("poll moved scrolled viewport: got=%q want=%q", got, before)
+	}
+	count := 0
+	for _, message := range scrolled.messages {
+		if message.ID == 21 {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("new message duplicate count=%d", count)
+	}
+}
+
+func TestSuccessfulSendReturnsScrolledChatToLatest(t *testing.T) {
+	model := scrollingModel(t, 20)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = typeText(updated.(Model), "synthetic send")
+	if before := model.renderChat(28, 6); strings.Contains(before, "Message 020") {
+		t.Fatalf("test did not start scrolled: %q", before)
+	}
+	updated, send := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if send == nil {
+		t.Fatal("missing send command")
+	}
+	updated, _ = updated.(Model).Update(send())
+	if got := updated.(Model).renderChat(28, 6); !strings.Contains(got, "Message 020") {
+		t.Fatalf("successful send did not return to latest: %q", got)
+	}
+}
+
+func TestChatResizeKeepsSelectionAndValidScrollPosition(t *testing.T) {
+	model := scrollingModel(t, 20)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(Model)
+	beforeThread := model.selectedID()
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 42, Height: 30})
+	model = updated.(Model)
+	if model.selectedID() != beforeThread || model.screen != chatScreen {
+		t.Fatalf("selected=%d screen=%d", model.selectedID(), model.screen)
+	}
+	_ = model.View()
 }
 
 func TestReadOnlySendKeepsComposerAndShowsUnavailable(t *testing.T) {
