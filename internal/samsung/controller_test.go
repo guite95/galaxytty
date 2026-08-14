@@ -40,7 +40,6 @@ func (d *controllerDevice) Shell(_ context.Context, args ...string) ([]byte, err
 func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
 	device := &controllerDevice{outputs: [][]byte{
 		[]byte("com.samsung.android.messaging\n"),
-		[]byte("Display Id=0\n  Display State=OFF\n"),
 	}}
 	controller, err := NewController(device, DefaultLayout())
 	if err != nil {
@@ -48,13 +47,6 @@ func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
 	}
 	display := domain.VirtualDisplay{AndroidDisplayID: 18, Width: 1080, Height: 1920}
 	if err := controller.EnsureDefaultSMSHandler(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	wasOff, err := controller.MainDisplayOff(context.Background())
-	if err != nil || !wasOff {
-		t.Fatalf("wasOff=%t err=%v", wasOff, err)
-	}
-	if err := controller.WakeVirtualDisplay(context.Background(), display); err != nil {
 		t.Fatal(err)
 	}
 	if err := controller.ShowHome(context.Background(), display); err != nil {
@@ -78,21 +70,14 @@ func TestControllerUsesDisplaySpecificPublicADBCommands(t *testing.T) {
 	if err := controller.TapSend(context.Background(), display); err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.SleepMainDisplay(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
 	want := [][]string{
 		{"cmd", "role", "get-role-holders", "android.app.role.SMS"},
-		{"dumpsys", "display"},
-		{"input", "-d", "18", "keyevent", "224"},
 		{"input", "-d", "18", "keyevent", "3"},
 		{"input", "-d", "18", "tap", "500", "1800"},
 		{"input", "-d", "18", "keycombination", "113", "29"},
 		{"input", "-d", "18", "keyevent", "67"},
 		{"input", "-d", "18", "keyevent", "279"},
 		{"input", "-d", "18", "tap", "1004", "955"},
-		{"input", "-d", "0", "keyevent", "223"},
 	}
 	if !reflect.DeepEqual(device.calls, want) {
 		t.Fatalf("calls=%q want=%q", device.calls, want)
@@ -118,41 +103,6 @@ $HOME ` + "`cmd`" + ` '"'"'quoted'"'"' 한글 😀'`
 	}
 	if _, err := quoteRemoteShellArg("bad\x00value"); err == nil {
 		t.Fatal("expected NUL rejection")
-	}
-}
-
-func TestMainDisplayOffParsesOnlyDisplayZero(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		output string
-		want   bool
-	}{
-		{"off", "Display Id=0\n  Display State=OFF\nDisplay Id=18\n  Display State=ON\n", true},
-		{"dozing", "Display Id=0\n  Display State=DOZE_SUSPEND\nDisplay Id=18\n  Display State=OFF\n", true},
-		{"on", "Display Id=0\n  Display State=ON\nDisplay Id=18\n  Display State=OFF\n", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			device := &controllerDevice{output: []byte(tc.output)}
-			controller, err := NewController(device, DefaultLayout())
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := controller.MainDisplayOff(context.Background())
-			if err != nil || got != tc.want {
-				t.Fatalf("got=%t want=%t err=%v", got, tc.want, err)
-			}
-		})
-	}
-}
-
-func TestMainDisplayOffRejectsUnknownOutput(t *testing.T) {
-	device := &controllerDevice{output: []byte("Display States: size=0")}
-	controller, err := NewController(device, DefaultLayout())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := controller.MainDisplayOff(context.Background()); !errors.Is(err, domain.ErrDisplayPower) {
-		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -201,19 +151,9 @@ func TestControllerWrapsSafeOperationErrors(t *testing.T) {
 		{"send", func(c *Controller) error {
 			return c.TapSend(context.Background(), domain.VirtualDisplay{AndroidDisplayID: 18})
 		}, domain.ErrSendTap},
-		{"power-state", func(c *Controller) error {
-			_, err := c.MainDisplayOff(context.Background())
-			return err
-		}, domain.ErrDisplayPower},
-		{"wake", func(c *Controller) error {
-			return c.WakeVirtualDisplay(context.Background(), domain.VirtualDisplay{AndroidDisplayID: 18})
-		}, domain.ErrDisplayPower},
 		{"home", func(c *Controller) error {
 			return c.ShowHome(context.Background(), domain.VirtualDisplay{AndroidDisplayID: 18})
 		}, domain.ErrClipboardSync},
-		{"sleep", func(c *Controller) error {
-			return c.SleepMainDisplay(context.Background())
-		}, domain.ErrDisplayPower},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			device := &controllerDevice{err: errors.New("synthetic adb failure")}

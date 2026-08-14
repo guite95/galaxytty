@@ -19,7 +19,6 @@ var (
 	ErrScrcpyStartup                = errors.New("scrcpy startup failed")
 	ErrVirtualDisplayIDNotFound     = errors.New("virtual display ID not found")
 	ErrScrcpyExited                 = errors.New("scrcpy exited unexpectedly")
-	ErrDisplayPower                 = errors.New("virtual display power preparation failed")
 	ErrConversationOpen             = errors.New("Samsung Messages conversation open failed")
 	ErrComposerTap                  = errors.New("Samsung Messages composer focus failed")
 	ErrComposerClear                = errors.New("Samsung Messages composer clear failed")

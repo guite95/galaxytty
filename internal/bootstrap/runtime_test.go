@@ -31,10 +31,9 @@ func TestMockBuildsApplicationWithThreadAwareSending(t *testing.T) {
 }
 
 type syntheticADB struct {
-	mu     sync.Mutex
-	sent   bool
-	wakes  int
-	sleeps int
+	mu             sync.Mutex
+	sent           bool
+	powerMutations int
 }
 
 func (*syntheticADB) Devices(context.Context) ([]adb.Device, error) {
@@ -57,8 +56,6 @@ func (b *syntheticADB) Shell(_ context.Context, target string, args ...string) (
 		return []byte("package:/synthetic/base.apk\n"), nil
 	case "cmd role get-role-holders android.app.role.SMS":
 		return []byte("com.samsung.android.messaging\n"), nil
-	case "dumpsys display":
-		return []byte("Display Id=0\n  Display State=OFF\nDisplay Id=18\n  Display State=ON\n"), nil
 	}
 	if len(args) > 0 && args[0] == "content" {
 		projection := argumentAfter(args, "--projection")
@@ -82,13 +79,13 @@ func (b *syntheticADB) Shell(_ context.Context, target string, args ...string) (
 	}
 	if key == "input -d 18 keyevent 224" {
 		b.mu.Lock()
-		b.wakes++
+		b.powerMutations++
 		b.mu.Unlock()
 		return nil, nil
 	}
 	if key == "input -d 0 keyevent 223" {
 		b.mu.Lock()
-		b.sleeps++
+		b.powerMutations++
 		b.mu.Unlock()
 		return nil, nil
 	}
@@ -172,10 +169,10 @@ func TestRealBuildsLazyVerifiedSenderAndInitializesPolling(t *testing.T) {
 		t.Fatalf("display starts=%d", display.starts)
 	}
 	backend.mu.Lock()
-	wakes, sleeps := backend.wakes, backend.sleeps
+	powerMutations := backend.powerMutations
 	backend.mu.Unlock()
-	if wakes != 0 || sleeps != 0 {
-		t.Fatalf("power lifecycle wakes=%d sleeps=%d", wakes, sleeps)
+	if powerMutations != 0 {
+		t.Fatalf("power lifecycle mutations=%d", powerMutations)
 	}
 	if messages, err := runtime.Service.Poll(context.Background(), 0); err != nil || len(messages) != 1 || messages[0].Direction != domain.DirectionOutgoing {
 		t.Fatalf("messages=%+v err=%v", messages, err)
