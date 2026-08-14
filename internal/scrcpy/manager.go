@@ -21,6 +21,7 @@ type Config struct {
 	Width, Height         int
 	StartupTimeout        time.Duration
 	InputMode             domain.TextInputMode
+	KeepActive            bool
 }
 
 type Manager struct {
@@ -81,6 +82,9 @@ func BuildArgs(cfg Config, recordPath string) []string {
 		"--start-app=" + cfg.Package,
 		"--record=" + recordPath,
 		"--no-audio",
+	}
+	if cfg.KeepActive {
+		args = append(args, "--keep-active")
 	}
 	if cfg.InputMode == domain.TextInputClipboard {
 		return append(args,

@@ -17,9 +17,10 @@ import (
 
 func TestBuildArgsSeparatesIntentAndClipboardModes(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		mode domain.TextInputMode
-		want []string
+		name       string
+		mode       domain.TextInputMode
+		keepActive bool
+		want       []string
 	}{
 		{
 			name: "intent body headless",
@@ -31,6 +32,21 @@ func TestBuildArgsSeparatesIntentAndClipboardModes(t *testing.T) {
 				"--start-app=com.samsung.android.messaging",
 				"--record=/synthetic/record.mp4",
 				"--no-audio",
+				"--no-video-playback",
+			},
+		},
+		{
+			name:       "intent body diagnostic keeps virtual display active",
+			mode:       domain.TextInputIntentBody,
+			keepActive: true,
+			want: []string{
+				"-s", "synthetic-target",
+				"--new-display=1080x1920",
+				"--display-ime-policy=local",
+				"--start-app=com.samsung.android.messaging",
+				"--record=/synthetic/record.mp4",
+				"--no-audio",
+				"--keep-active",
 				"--no-video-playback",
 			},
 		},
@@ -54,7 +70,7 @@ func TestBuildArgsSeparatesIntentAndClipboardModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := Config{
 				Target: "synthetic-target", Package: "com.samsung.android.messaging",
-				Width: 1080, Height: 1920, InputMode: tc.mode,
+				Width: 1080, Height: 1920, InputMode: tc.mode, KeepActive: tc.keepActive,
 			}
 			if got := BuildArgs(cfg, "/synthetic/record.mp4"); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("BuildArgs() = %#v; want %#v", got, tc.want)
