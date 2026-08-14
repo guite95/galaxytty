@@ -200,6 +200,7 @@ func TestRealSendErrorsAreActionableAndLeaveJSONStdoutEmpty(t *testing.T) {
 		want string
 	}{
 		{"scrcpy", domain.ErrScrcpyNotFound, "Install scrcpy"},
+		{"Samsung Messages is not default", domain.ErrSamsungMessagesNotDefault, "Set Samsung Messages as the default SMS app"},
 		{"clipboard", domain.ErrClipboardRead, "pbcopy and pbpaste"},
 		{"verification", domain.ErrSendVerificationTimeout, "not verified"},
 	} {

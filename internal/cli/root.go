@@ -197,6 +197,8 @@ func actionableRealError(err error) error {
 		return fmt.Errorf("%w. Select one with --device <adb-target>", err)
 	case errors.Is(err, domain.ErrSamsungMessagesNotInstalled):
 		return fmt.Errorf("%w. Install or enable com.samsung.android.messaging", err)
+	case errors.Is(err, domain.ErrSamsungMessagesNotDefault):
+		return fmt.Errorf("%w. Set Samsung Messages as the default SMS app on the Galaxy, then retry", err)
 	case errors.Is(err, domain.ErrProviderPermissionDenied):
 		return fmt.Errorf("%w. This Galaxy does not allow ADB shell read access to the required provider", err)
 	case errors.Is(err, domain.ErrProviderOutput):
