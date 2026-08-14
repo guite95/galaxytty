@@ -22,7 +22,10 @@ type Config struct {
 	StartupTimeout        time.Duration
 	InputMode             domain.TextInputMode
 	KeepActive            bool
-	VideoPlayback         bool
+	// VideoPlayback is used only by gated diagnostics. Production intent-body
+	// sessions keep the headless-like default until reference-device evidence
+	// proves otherwise.
+	VideoPlayback bool
 }
 
 type Manager struct {

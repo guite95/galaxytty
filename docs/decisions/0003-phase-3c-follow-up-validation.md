@@ -71,10 +71,24 @@ display, accepted SENDTO and composer-focus commands, but reported display
 state `OFF`, no resumed Samsung activity, no focused Samsung window, and
 composer readiness false. `--keep-active` produced no difference.
 
+The focus parser was then hardened to read only the current `dumpsys input`
+snapshot before `FocusRequests:`. It no longer treats stale/request entries as
+current focus, and composer readiness now requires current focused display,
+current Samsung application, current Samsung window, and a resumed Samsung
+activity. The corrected current observation retained current focused display and
+application, but display `OFF`, no resumed Samsung activity, and no current
+focused Samsung window.
+
+The following non-sending current-versus-video-playback diagnostic removed only
+`--no-video-playback` from the playback variant. Both variants produced the
+same not-ready state and `VIDEO_PLAYBACK_DIFFERENCE=BOTH_NOT_READY`. No message
+send, wake/sleep injection, coordinate change, clipboard action, or verifier
+change occurred.
+
 CONCLUSION: retain the READ and virtual-display lifecycle PASS results, record
 the single SMS regression as an unverified failed attempt with no retry, and do
 not restore `--keep-active`. The next investigation must remain non-sending and
-isolate video playback/window presence before another actual-send regression.
+isolate virtual-display activation before another actual-send regression.
 RCS and MMS actual-send regressions remain SKIP.
 
 ## Decision
@@ -86,10 +100,10 @@ without restoring explicit Android wake/sleep injection. Keep the Phase 3-B SMS
 evidence as historical evidence, not proof of the changed Phase 3-C path. RCS
 and MMS remain unsupported/unverified by this follow-up run.
 
-The A/B result rejects `--keep-active` as the production fix. Keep production
-arguments unchanged until a separate non-sending test determines whether the
-headless-like `--no-video-playback` session is the reason no focused Samsung
-Messages window exists.
+The A/B results reject both `--keep-active` and host video playback as the
+production fix. Keep production arguments unchanged until a separately designed
+non-sending virtual-display activation test has evidence for another minimal
+change.
 
 ## Why
 
@@ -115,6 +129,11 @@ unapproved recipient or upgrade a prior-path result into current evidence.
 - Provider correlation reported `ACTUAL_MESSAGE_CREATED=false`; cleanup left no
   scrcpy process, temporary recording, or virtual display, and the physical
   display remained `OFF` in the post-cleanup observation.
+- Current-focus parser tests prove that `FocusRequests:` cannot make composer
+  readiness true.
+- The playback diagnostic passed with
+  `VIDEO_PLAYBACK_DIFFERENCE=BOTH_NOT_READY`, no actual outgoing evidence, and
+  the same clean scrcpy/display cleanup.
 
 No recipient, message body, contact, credential, or raw provider row is stored
 in this record.
@@ -131,9 +150,8 @@ in this record.
 
 ## Revisit condition
 
-Run one gated non-sending `--no-video-playback` versus video-playback diagnostic
-with a separately supplied diagnostic recipient. Only after a variant proves a
-focused, input-capable Samsung Messages window should one fresh actual-send
-regression be designed under its own explicit approval and gate. Update this
-record after Android, One UI, Samsung Messages, scrcpy, layout coordinates, or
-provider shape changes.
+Design one gated non-sending virtual-display activation investigation under a
+new explicit scope. Only after a variant proves a focused, input-capable Samsung
+Messages window should one fresh actual-send regression be designed under its
+own explicit approval and gate. Update this record after Android, One UI,
+Samsung Messages, scrcpy, layout coordinates, or provider shape changes.

@@ -100,11 +100,12 @@ runtime Android logical display ID parsed from scrcpy output. GalaxyTTY never
 enters a PIN or intentionally unlocks the main display.
 
 Reference-device validation currently has an open send-path limitation. A
-non-sending A/B on SM-A376N found that both the default headless-like session
-and the same session with `--keep-active` left the virtual display `OFF` with no
-focused Samsung Messages window. `--keep-active` therefore remains disabled,
-and the changed Phase 3-C production path is not claimed as actual-send
-verified until the video-playback/window dependency is isolated. See the
+non-sending A/B on SM-A376N found that the default headless-like session, the
+same session with `--keep-active`, and a session with only
+`--no-video-playback` removed all left the virtual display `OFF` with no current
+focused Samsung Messages window. `--keep-active` and host video playback remain
+disabled in production, and the changed Phase 3-C path is not claimed as
+actual-send verified until virtual-display activation itself is isolated. See the
 [virtual-display power decision](docs/decisions/0002-virtual-display-power-behavior.md).
 
 ### Transport verification

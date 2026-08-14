@@ -73,6 +73,40 @@ false. scrcpy 4.1 documents `--keep-active` as simulating user activity to keep
 the screen on, but it did not change this virtual-display state on the
 reference device.
 
+### Focus parser correction
+
+The first diagnostic parser treated any matching `FocusedDisplayId`,
+`FocusedApplications`, or `FocusedWindows` entry in `dumpsys input` as current
+state. That could incorrectly accept entries nested below `FocusRequests:`.
+The parser now reads only the current snapshot before that section and reports
+current focused display, application, and window separately. Composer readiness
+also now requires a resumed Samsung activity in addition to display `ON`, the
+Samsung task, and all three current-focus signals.
+
+The corrected reference-device output still had current focused display and
+Samsung application on the runtime display, but display `OFF`, no resumed
+Samsung activity, and no current focused Samsung window. The correction makes
+the previous result stricter; it does not support restoring `--keep-active`.
+
+### Video playback observation
+
+The next gated non-sending comparison used the production intent-body arguments
+as the current variant. The playback variant removed only
+`--no-video-playback`; it did not add `--keep-active`, a window size or border
+option, a wake/sleep action, a coordinate change, or a send action.
+
+Both variants produced the same reference-device result: virtual display `OFF`
+after startup, SENDTO, and composer focus; Samsung task and current focused
+application on the runtime display; no resumed Samsung activity; no current
+focused Samsung window; composer readiness false. The sanitized result was
+`VIDEO_PLAYBACK_DIFFERENCE=BOTH_NOT_READY`.
+
+scrcpy documents `--no-video-playback` as disabling host video playback and
+documents `--record` separately. The result therefore ends the playback/window
+hypothesis for this device rather than assuming playback must activate the
+virtual display. See the upstream [virtual display documentation](https://github.com/Genymobile/scrcpy/blob/v4.1/doc/virtual-display.md)
+and [device power documentation](https://github.com/Genymobile/scrcpy/blob/v4.1/doc/device.md).
+
 ## Decision
 
 Production scrcpy arguments continue to omit `--keep-active`; the single-variable
@@ -81,9 +115,10 @@ expose methods for waking the virtual display, sleeping display 0, or querying
 display power as part of a send. The sender never injects key codes 224 or 223.
 
 The current headless-like path is not considered send-ready on the reference
-device merely because scrcpy starts. Before another actual-send regression,
-the next non-sending investigation must isolate whether video playback supplies
-the focused window or active display state missing from both A/B variants.
+device merely because scrcpy starts. Video playback did not supply the missing
+active display or focused window. Before another actual-send regression, the
+next investigation must isolate virtual-display power/activation itself without
+adding an Android power mutation in this phase.
 
 The integration tests may read main-display lock and power state before and
 after a gated display/send run. They do not mutate that state.
@@ -122,6 +157,13 @@ caller from reintroducing the behavior without an explicit design change.
   and no matching SMS-provider row of any type.
 - Each variant stopped and reaped scrcpy, removed its runtime display, removed
   its temporary recording, and preserved the observed physical-display state.
+- Current-focus parser regression tests prove that `FocusRequests:` entries do
+  not count as current focused display, application, or window state.
+- `TestRealSamsungVideoPlaybackComposerDiagnostic` passed on the reference
+  device without invoking a send action. Removing only `--no-video-playback`
+  produced no readiness difference and left no scrcpy process, recording, or
+  virtual display. Accessible provider correlation again reported no actual
+  message creation.
 
 ## Alternatives rejected
 
@@ -135,13 +177,18 @@ caller from reintroducing the behavior without an explicit design change.
   display, task, focus, or composer-readiness improvement.
 - Tapping Send to distinguish UI readiness is rejected because display and
   focused-window state can be observed without creating a carrier message.
+- Restoring host video playback in production is rejected because the
+  single-variable A/B did not improve virtual-display state, activity, focus,
+  or composer readiness and would add a visible-host-window dependency.
+- KEYCODE wake/power, `cmd display power-on`, private scrcpy control, and helper
+  APK experiments are deferred to a separate virtual-display activation task.
 
 ## Revisit condition
 
-Before any actual-send retry, compare the current `--no-video-playback` session
-against an otherwise equivalent video-playback session without tapping Send.
-Revisit `--keep-active` only after Android, One UI, Samsung Messages, or scrcpy
-updates produce different evidence. Any explicit Android power reintroduction
-must separately record pre-send and current lock/power state, avoid sleeping an
+Before any actual-send retry, design one separately approved non-sending
+virtual-display activation investigation. Do not re-run playback or
+`--keep-active` unless Android, One UI, Samsung Messages, or scrcpy updates
+produce different evidence. Any explicit Android power reintroduction must
+separately record pre-send and current lock/power state, avoid sleeping an
 unlocked user session, and include a regression test for the exact minimal
 mutation required.
