@@ -34,6 +34,14 @@ func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) (e
 		help()
 		return nil
 	}
+	path, err := config.Path()
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return fmt.Errorf("load config %s: %w", path, err)
+	}
 	if !mockMode {
 		return fmt.Errorf("real device adapters are not implemented; run with --mock")
 	}
@@ -43,7 +51,6 @@ func Execute(ctx context.Context, in io.Reader, out io.Writer, args []string) (e
 	lifecycle := app.NewLifecycle(d, n)
 	_ = lifecycle.Transition(app.Connecting)
 	_ = lifecycle.Transition(app.Ready)
-	cfg := config.Default()
 	service := app.NewService(b, b, n, lifecycle, app.NotificationPolicy{Enabled: cfg.Notifications.Enabled, ShowWhenFocused: cfg.Notifications.ShowWhenFocused}, domain.ApplicationStatus{Label: "Mock Connected"})
 	if err = service.InitializePolling(ctx); err != nil {
 		return err

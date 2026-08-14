@@ -66,12 +66,28 @@ func (b *Backend) LatestMessageID(context.Context) (int64, error) {
 	return id, nil
 }
 func (b *Backend) Send(_ context.Context, phone, text string) error {
-	if domain.NormalizePhone(phone) == "" || text == "" {
+	normalizedPhone := domain.NormalizePhone(phone)
+	if normalizedPhone == "" || text == "" {
 		return fmt.Errorf("phone and text are required")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	m := domain.Message{ID: b.nextID, ThreadID: 1, Address: phone, Body: text, Timestamp: time.Now(), Direction: domain.DirectionOutgoing, Read: true, Type: domain.MessageSMS}
+	var threadID int64
+	for _, conversation := range b.ConversationsData {
+		for _, participant := range conversation.Participants {
+			if domain.NormalizePhone(participant.Phone) == normalizedPhone {
+				threadID = conversation.ThreadID
+				break
+			}
+		}
+		if threadID != 0 {
+			break
+		}
+	}
+	if threadID == 0 {
+		return fmt.Errorf("mock conversation for phone not found")
+	}
+	m := domain.Message{ID: b.nextID, ThreadID: threadID, Address: phone, Body: text, Timestamp: time.Now(), Direction: domain.DirectionOutgoing, Read: true, Type: domain.MessageSMS}
 	b.nextID++
 	b.MessagesData = append(b.MessagesData, m)
 	b.Sent = append(b.Sent, m)

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,5 +40,20 @@ func TestJSONOnly(t *testing.T) {
 func TestSendValidation(t *testing.T) {
 	if _, e := run(t, "send", "--mock", "--to", "010"); e == nil {
 		t.Fatal("expected text validation")
+	}
+}
+
+func TestExecuteRejectsInvalidStartupConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	configDir := filepath.Join(dir, "galaxytty")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("unknown=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "doctor", "--mock"); err == nil || !strings.Contains(err.Error(), "decode config") {
+		t.Fatalf("err=%v", err)
 	}
 }
