@@ -1,6 +1,9 @@
 package provider
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 type Sheller interface {
 	Shell(context.Context, ...string) ([]byte, error)
@@ -8,6 +11,10 @@ type Sheller interface {
 
 type Store struct {
 	shell Sheller
+
+	contactsMu     sync.Mutex
+	contactsLoaded bool
+	contacts       map[string]string
 }
 
 func NewStore(shell Sheller) *Store {
