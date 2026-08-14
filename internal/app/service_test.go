@@ -75,3 +75,18 @@ func TestNotificationsDisabledAndFocusedEnabled(t *testing.T) {
 		t.Fatal(n2.Items)
 	}
 }
+
+type fixedStatus struct{ value domain.ApplicationStatus }
+
+func (f fixedStatus) Status(context.Context) domain.ApplicationStatus { return f.value }
+
+func TestServiceUsesDynamicStatusProvider(t *testing.T) {
+	service, _, _ := serviceFixture(NotificationPolicy{})
+	service.WithStatusProvider(fixedStatus{value: domain.ApplicationStatus{
+		State: "disconnected", Label: "Offline",
+	}})
+	got := service.Status(context.Background())
+	if got.Label != "Offline" || got.State != "disconnected" {
+		t.Fatalf("%+v", got)
+	}
+}

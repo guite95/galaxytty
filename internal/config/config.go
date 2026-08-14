@@ -21,7 +21,8 @@ func (d *Duration) UnmarshalText(v []byte) error {
 
 type Config struct {
 	Connection struct {
-		PreferUSB bool `toml:"prefer_usb"`
+		PreferUSB bool   `toml:"prefer_usb"`
+		Device    string `toml:"device"`
 	} `toml:"connection"`
 	Polling struct {
 		Interval Duration `toml:"interval"`

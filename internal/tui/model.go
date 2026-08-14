@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -88,18 +89,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = max(30, x.Width)
 		m.height = max(10, x.Height)
 	case conversationsMsg:
-		m.conversations = x.items
+		m.replaceConversations(x.items)
 		m.setError(x.err)
 		m.status = m.service.Status(m.ctx).Label
 	case messagesMsg:
 		m.messages = x.items
 		m.setError(x.err)
+		m.refreshStatus()
 		if x.err == nil {
 			m.screen = chatScreen
 			m.composer.Focus()
 		}
 	case sentMsg:
 		m.setError(x.err)
+		m.refreshStatus()
 		if x.err == nil {
 			m.composer.SetValue("")
 			return m, m.loadMessages(m.selectedID())
@@ -108,6 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.poll(), m.tick())
 	case pollMsg:
 		m.setError(x.err)
+		m.refreshStatus()
 		if len(x.items) > 0 {
 			if m.screen == chatScreen {
 				return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))
@@ -195,9 +199,42 @@ func (m Model) selectedID() int64 {
 	}
 	return 0
 }
+
+func (m *Model) replaceConversations(items []domain.Conversation) {
+	selectedThreadID := m.selectedID()
+	m.conversations = items
+	if len(items) == 0 {
+		m.cursor = 0
+		if m.screen == chatScreen {
+			m.screen = conversationsScreen
+			m.messages = nil
+		}
+		return
+	}
+	if selectedThreadID != 0 {
+		for index, conversation := range items {
+			if conversation.ThreadID == selectedThreadID {
+				m.cursor = index
+				return
+			}
+		}
+	}
+	m.cursor = min(m.cursor, len(items)-1)
+}
+
 func (m *Model) setError(e error) {
 	if e != nil {
+		if errors.Is(e, domain.ErrSendingNotImplemented) {
+			m.errorText = "Sending is not available yet."
+			return
+		}
 		m.errorText = e.Error()
+	}
+}
+
+func (m *Model) refreshStatus() {
+	if status := m.service.Status(m.ctx); status.Label != "" {
+		m.status = status.Label
 	}
 }
 
@@ -225,7 +262,12 @@ func (m Model) View() string {
 }
 func (m Model) renderConversations(w, h int) string {
 	lines := []string{"Conversations"}
-	for i, c := range m.conversations {
+	visible := max(1, (h-1)/2)
+	start := max(0, m.cursor-visible/2)
+	end := min(len(m.conversations), start+visible)
+	start = max(0, end-visible)
+	for i := start; i < end; i++ {
+		c := m.conversations[i]
 		mark := "  "
 		if c.UnreadCount > 0 {
 			mark = "● "
@@ -243,11 +285,14 @@ func (m Model) renderChat(w, h int) string {
 		return lipgloss.NewStyle().Width(w).Height(h).Render("Select a conversation")
 	}
 	lines := []string{headerStyle.Render(truncate(m.conversations[m.cursor].Title, w))}
-	for _, msg := range m.messages {
+	visible := max(1, h-1)
+	start := max(0, len(m.messages)-visible)
+	for _, msg := range m.messages[start:] {
 		body := msg.Body
 		if len(msg.Attachments) > 0 {
 			body = "🖼 이미지"
 		}
+		body = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(body)
 		body = truncate(body, max(1, w-3))
 		if msg.Direction == domain.DirectionOutgoing {
 			body = outgoingStyle.Render("→ " + body)

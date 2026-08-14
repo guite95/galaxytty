@@ -10,8 +10,14 @@ func NormalizePhone(v string) string {
 			b.WriteRune(r)
 		}
 	}
-	if strings.HasPrefix(b.String(), "+82") {
-		return "0" + strings.TrimPrefix(b.String(), "+82")
+	normalized := b.String()
+	if strings.HasPrefix(normalized, "+82") {
+		national := strings.TrimPrefix(normalized, "+82")
+		national = strings.TrimPrefix(national, "0")
+		if national == "" {
+			return ""
+		}
+		return "0" + national
 	}
-	return b.String()
+	return normalized
 }

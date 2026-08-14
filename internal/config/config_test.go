@@ -42,3 +42,10 @@ func TestPath(t *testing.T) {
 		t.Fatal(p, e)
 	}
 }
+
+func TestDeviceSelector(t *testing.T) {
+	c, err := Load(write(t, "[connection]\nprefer_usb=false\ndevice='synthetic-target'\n"))
+	if err != nil || c.Connection.Device != "synthetic-target" {
+		t.Fatalf("device=%q err=%v", c.Connection.Device, err)
+	}
+}

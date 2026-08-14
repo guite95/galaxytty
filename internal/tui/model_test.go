@@ -2,10 +2,13 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/mock"
+	"github.com/galaxytty/galaxytty/internal/readonly"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +97,22 @@ func TestSlashCommands(t *testing.T) {
 		t.Fatal(u.(Model).errorText)
 	}
 }
+
+func TestCtrlCShutsDown(t *testing.T) {
+	m, _ := fixture(t)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("missing shutdown command")
+	}
+	updated, cmd = updated.(Model).Update(cmd())
+	if cmd == nil {
+		t.Fatal("missing quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("shutdown did not quit")
+	}
+}
+
 func TestAsyncIncomingRefresh(t *testing.T) {
 	m, b := fixture(t)
 	m = open(t, m)
@@ -106,4 +125,112 @@ func TestAsyncIncomingRefresh(t *testing.T) {
 		t.Fatal("expected refresh")
 	}
 	_ = u
+}
+
+type mutableStatus struct{ value domain.ApplicationStatus }
+
+func (s *mutableStatus) Status(context.Context) domain.ApplicationStatus { return s.value }
+
+func readOnlyFixture(t *testing.T) (Model, *mutableStatus) {
+	t.Helper()
+	backend := mock.New()
+	status := &mutableStatus{value: domain.ApplicationStatus{State: "connected", Connection: domain.ConnectionUSB, Label: "USB"}}
+	lifecycle := app.NewLifecycle(nil, readonly.Notifier{})
+	_ = lifecycle.Transition(app.Connecting)
+	_ = lifecycle.Transition(app.Ready)
+	service := app.NewService(backend, readonly.Sender{}, readonly.Notifier{}, lifecycle, app.NotificationPolicy{}, status.value).WithStatusProvider(status)
+	if err := service.InitializePolling(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	model := NewModel(context.Background(), service, time.Hour)
+	updated, _ := model.Update(conversationsMsg{items: backend.ConversationsData})
+	return updated.(Model), status
+}
+
+func TestProviderErrorRefreshesOfflineStatus(t *testing.T) {
+	model, status := readOnlyFixture(t)
+	status.value = domain.ApplicationStatus{State: "disconnected", Connection: domain.ConnectionUSB, Label: "Offline"}
+	updated, _ := model.Update(messagesMsg{err: errors.New("synthetic provider error")})
+	if got := updated.(Model).status; got != "Offline" {
+		t.Fatalf("status=%q", got)
+	}
+}
+
+func TestConversationRefreshKeepsSelectedThread(t *testing.T) {
+	model, _ := fixture(t)
+	model.cursor = 1
+	selectedThreadID := model.selectedID()
+	refreshed := []domain.Conversation{
+		{ThreadID: selectedThreadID, Title: "Selected"},
+		{ThreadID: 1, Title: "First"},
+		{ThreadID: 3, Title: "Third"},
+	}
+	updated, _ := model.Update(conversationsMsg{items: refreshed})
+	got := updated.(Model)
+	if got.cursor != 0 || got.selectedID() != selectedThreadID {
+		t.Fatalf("cursor=%d selected=%d", got.cursor, got.selectedID())
+	}
+}
+
+func TestConversationListRendersOnlyVisibleWindow(t *testing.T) {
+	model, _ := fixture(t)
+	model.conversations = make([]domain.Conversation, 30)
+	for index := range model.conversations {
+		model.conversations[index] = domain.Conversation{
+			ThreadID: int64(index + 1),
+			Title:    fmt.Sprintf("Conversation %02d", index),
+			Snippet:  "Synthetic snippet",
+		}
+	}
+	model.cursor = 20
+	rendered := model.renderConversations(24, 10)
+	if !strings.Contains(rendered, "Conversation 20") {
+		t.Fatal("selected conversation is outside rendered window")
+	}
+	if strings.Contains(rendered, "Conversation 00") {
+		t.Fatal("off-screen conversation was rendered")
+	}
+	if lines := strings.Count(rendered, "\n") + 1; lines > 10 {
+		t.Fatalf("rendered lines=%d", lines)
+	}
+}
+
+func TestChatRendersLatestVisibleMessageWindow(t *testing.T) {
+	model, _ := fixture(t)
+	model.screen = chatScreen
+	model.messages = make([]domain.Message, 30)
+	for index := range model.messages {
+		model.messages[index] = domain.Message{
+			ID:        int64(index + 1),
+			ThreadID:  1,
+			Body:      fmt.Sprintf("Message %02d", index),
+			Direction: domain.DirectionIncoming,
+		}
+	}
+	model.messages[len(model.messages)-1].Body = "Recent\nmessage"
+	rendered := model.renderChat(24, 10)
+	if !strings.Contains(rendered, "Recent message") {
+		t.Fatal("latest multiline message was not rendered as one line")
+	}
+	if strings.Contains(rendered, "Message 00") {
+		t.Fatal("off-screen message was rendered")
+	}
+	if lines := strings.Count(rendered, "\n") + 1; lines > 10 {
+		t.Fatalf("rendered lines=%d", lines)
+	}
+}
+
+func TestReadOnlySendKeepsComposerAndShowsUnavailable(t *testing.T) {
+	model, _ := readOnlyFixture(t)
+	model = open(t, model)
+	model = typeText(model, "synthetic hello")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("missing send command")
+	}
+	updated, _ = updated.(Model).Update(cmd())
+	got := updated.(Model)
+	if got.composer.Value() != "synthetic hello" || got.errorText != "Sending is not available yet." {
+		t.Fatalf("composer=%q error=%q", got.composer.Value(), got.errorText)
+	}
 }
