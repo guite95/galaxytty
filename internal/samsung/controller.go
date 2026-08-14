@@ -61,7 +61,7 @@ func (c *Controller) OpenConversation(ctx context.Context, display domain.Virtua
 }
 
 func (c *Controller) EnsureDefaultSMSHandler(ctx context.Context) error {
-	return ensureDefaultSMSHandler(ctx, c.device)
+	return CheckDefaultSMSHandler(ctx, c.device)
 }
 
 func (c *Controller) OpenConversationWithBody(ctx context.Context, display domain.VirtualDisplay, phone, body string) error {

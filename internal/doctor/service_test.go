@@ -14,14 +14,15 @@ import (
 )
 
 type fakeADB struct {
-	version          string
-	versionErr       error
-	devices          []adb.Device
-	packageInstalled bool
-	providerOutput   map[string][]byte
-	contentCalls     [][]string
-	shellCalls       [][]string
-	mdnsErr          error
+	version           string
+	versionErr        error
+	devices           []adb.Device
+	packageInstalled  bool
+	defaultSMSHandler string
+	providerOutput    map[string][]byte
+	contentCalls      [][]string
+	shellCalls        [][]string
+	mdnsErr           error
 }
 
 func readyADB(connection domain.ConnectionKind) *fakeADB {
@@ -30,10 +31,11 @@ func readyADB(connection domain.ConnectionKind) *fakeADB {
 		target = "adb-USB123-token._adb-tls-connect._tcp"
 	}
 	return &fakeADB{
-		version:          "Android Debug Bridge version 1.0.41",
-		devices:          []adb.Device{{Target: target, State: "device", Connection: connection}},
-		packageInstalled: true,
-		providerOutput:   map[string][]byte{},
+		version:           "Android Debug Bridge version 1.0.41",
+		devices:           []adb.Device{{Target: target, State: "device", Connection: connection}},
+		packageInstalled:  true,
+		defaultSMSHandler: "com.samsung.android.messaging",
+		providerOutput:    map[string][]byte{},
 	}
 }
 
@@ -68,6 +70,11 @@ func (f *fakeADB) Shell(_ context.Context, target string, args ...string) ([]byt
 			return []byte("package:/synthetic/base.apk\n"), nil
 		}
 		return []byte("\n"), nil
+	case "cmd role get-role-holders android.app.role.SMS":
+		if f.defaultSMSHandler == "" {
+			return []byte("\n"), nil
+		}
+		return []byte(f.defaultSMSHandler + "\n"), nil
 	}
 	if len(args) > 0 && args[0] == "content" {
 		f.contentCalls = append(f.contentCalls, append([]string(nil), args...))
@@ -187,6 +194,52 @@ func TestDoctorMissingClipboardKeepsIntentBodySendReady(t *testing.T) {
 				t.Fatalf("report=%+v", report)
 			}
 		})
+	}
+}
+
+func TestDoctorNonDefaultSamsungRoleKeepsReadReadyAndBlocksSend(t *testing.T) {
+	backend := readyADB(domain.ConnectionUSB)
+	backend.defaultSMSHandler = "example.other"
+	report := (Service{
+		ADB: backend,
+		InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
+			return scrcpy.VersionInfo{Path: "/synthetic/scrcpy", Version: "4.1"}, nil
+		},
+		LookPath: func(name string) (string, error) { return "/synthetic/" + name, nil },
+	}).Run(context.Background(), config.Default(), "")
+	if !report.ReadReady || report.SendReady {
+		t.Fatalf("report=%+v", report)
+	}
+	check := findCheck(report, "Samsung Messages default SMS handler")
+	if check.State != Fail || !strings.Contains(check.Detail, "not default") {
+		t.Fatalf("default role check=%+v", check)
+	}
+}
+
+func TestDoctorClipboardModeRequiresCompatibilityTools(t *testing.T) {
+	backend := readyADB(domain.ConnectionUSB)
+	cfg := config.Default()
+	cfg.Samsung.TextInputMode = domain.TextInputClipboard
+	report := (Service{
+		ADB: backend,
+		InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
+			return scrcpy.VersionInfo{Path: "/synthetic/scrcpy", Version: "4.1"}, nil
+		},
+		LookPath: func(name string) (string, error) {
+			if name == "osascript" {
+				return "", errors.New("missing")
+			}
+			return "/synthetic/" + name, nil
+		},
+	}).Run(context.Background(), cfg, "")
+	if !report.ReadReady || report.SendReady {
+		t.Fatalf("report=%+v", report)
+	}
+	if check := findCheck(report, "Text input mode"); check.State != Pass || check.Detail != "clipboard" {
+		t.Fatalf("mode check=%+v", check)
+	}
+	if check := findCheck(report, "macOS clipboard compatibility"); check.State != Fail {
+		t.Fatalf("clipboard check=%+v", check)
 	}
 }
 

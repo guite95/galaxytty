@@ -50,7 +50,7 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 	version, err := s.ADB.Version(ctx)
 	if err != nil || strings.TrimSpace(version) == "" {
 		report.Checks = append(report.Checks, Check{Name: "adb", Detail: "not available", State: Fail})
-		s.finish(ctx, cfg, &report, false)
+		s.finish(ctx, cfg, &report, false, false)
 		return report
 	}
 	report.Checks = append(report.Checks, Check{Name: "adb", Detail: firstLine(version), State: Pass})
@@ -61,15 +61,22 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 	target, err := adb.Discover(ctx, s.ADB, adb.SelectionOptions{PreferUSB: cfg.Connection.PreferUSB, Target: selector})
 	if err != nil {
 		report.Checks = append(report.Checks, Check{Name: "Galaxy", Detail: discoveryDetail(err), State: Fail})
-		s.finish(ctx, cfg, &report, false)
+		s.finish(ctx, cfg, &report, false, false)
 		return report
 	}
 	info := target.Info()
 	report.Checks = append(report.Checks,
 		Check{Name: "Galaxy", Detail: info.Model, State: Pass},
 		Check{Name: "Connection", Detail: connectionLabel(info.Connection), State: Pass},
-		Check{Name: "Samsung Messages", Detail: "com.samsung.android.messaging", State: Pass},
+		Check{Name: "Samsung Messages installed", Detail: samsung.MessagesPackage, State: Pass},
 	)
+	defaultHandlerReady := true
+	if err := samsung.CheckDefaultSMSHandler(ctx, target); err != nil {
+		report.Checks = append(report.Checks, Check{Name: "Samsung Messages default SMS handler", Detail: "installed but not default", State: Fail})
+		defaultHandlerReady = false
+	} else {
+		report.Checks = append(report.Checks, Check{Name: "Samsung Messages default SMS handler", Detail: "default", State: Pass})
+	}
 
 	store := provider.NewStore(target)
 	requiredReady := true
@@ -106,18 +113,18 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 		}
 	}
 
-	s.finish(ctx, cfg, &report, requiredReady)
+	s.finish(ctx, cfg, &report, requiredReady, defaultHandlerReady)
 	return report
 }
 
-func (s Service) finish(ctx context.Context, cfg config.Config, report *Report, readReady bool) {
+func (s Service) finish(ctx context.Context, cfg config.Config, report *Report, readReady, defaultHandlerReady bool) {
 	if _, err := s.ADB.MDNSServices(ctx); err != nil {
 		report.Checks = append(report.Checks, Check{Name: "Wireless discovery", Detail: "unavailable", State: Info})
 	} else {
 		report.Checks = append(report.Checks, Check{Name: "Wireless discovery", Detail: "available", State: Info})
 	}
 
-	sendPrerequisites := true
+	sendPrerequisites := defaultHandlerReady
 	if s.InspectScrcpy == nil {
 		s.InspectScrcpy = scrcpy.Inspect
 	}
@@ -141,9 +148,13 @@ func (s Service) finish(ctx context.Context, cfg config.Config, report *Report, 
 	}
 	if clipboardReady {
 		report.Checks = append(report.Checks, Check{Name: "macOS clipboard compatibility", Detail: "pbcopy, pbpaste, and scrcpy shortcut bridge available", State: Pass})
+	} else if cfg.Samsung.TextInputMode == domain.TextInputClipboard {
+		report.Checks = append(report.Checks, Check{Name: "macOS clipboard compatibility", Detail: "required tools unavailable for clipboard mode", State: Fail})
+		sendPrerequisites = false
 	} else {
 		report.Checks = append(report.Checks, Check{Name: "macOS clipboard compatibility", Detail: "unavailable; intent-body send remains supported", State: Info})
 	}
+	report.Checks = append(report.Checks, Check{Name: "Text input mode", Detail: string(cfg.Samsung.TextInputMode), State: Pass})
 
 	layout := samsung.Layout{
 		Width: cfg.Samsung.DisplayWidth, Height: cfg.Samsung.DisplayHeight,

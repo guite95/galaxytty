@@ -22,7 +22,7 @@ func SamsungMessagesIsDefault(output string) bool {
 	return false
 }
 
-func ensureDefaultSMSHandler(ctx context.Context, device domain.Device) error {
+func CheckDefaultSMSHandler(ctx context.Context, device domain.Device) error {
 	output, err := device.Shell(ctx, "cmd", "role", "get-role-holders", smsRoleName)
 	if err != nil {
 		return safeControllerError{kind: domain.ErrSamsungMessagesNotDefault, cause: err}
