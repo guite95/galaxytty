@@ -3,6 +3,8 @@ package doctor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/provider"
+	"github.com/galaxytty/galaxytty/internal/samsung"
 	"github.com/galaxytty/galaxytty/internal/scrcpy"
 )
 
@@ -22,15 +25,17 @@ type ADB interface {
 type Service struct {
 	ADB           ADB
 	InspectScrcpy func(context.Context, string) (scrcpy.VersionInfo, error)
+	LookPath      func(string) (string, error)
 }
 
 func Run(ctx context.Context, cfg config.Config, selector string) Report {
 	client, err := adb.NewClient("", 5*time.Second)
 	if err != nil {
-		return Report{
-			Checks:  []Check{{Name: "adb", Detail: "not found", State: Fail}},
-			Summary: "Read mode not ready. Install Android platform-tools and connect an authorized Galaxy.",
+		report := Report{
+			Checks: []Check{{Name: "adb", Detail: "not found", State: Fail}},
 		}
+		setReadiness(&report, false, false)
+		return report
 	}
 	return (Service{ADB: client, InspectScrcpy: scrcpy.Inspect}).Run(ctx, cfg, selector)
 }
@@ -39,13 +44,13 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 	report := Report{}
 	if s.ADB == nil {
 		report.Checks = append(report.Checks, Check{Name: "adb", Detail: "not available", State: Fail})
-		report.Summary = notReadySummary
+		setReadiness(&report, false, false)
 		return report
 	}
 	version, err := s.ADB.Version(ctx)
 	if err != nil || strings.TrimSpace(version) == "" {
 		report.Checks = append(report.Checks, Check{Name: "adb", Detail: "not available", State: Fail})
-		report.Summary = notReadySummary
+		s.finish(ctx, cfg, &report, false)
 		return report
 	}
 	report.Checks = append(report.Checks, Check{Name: "adb", Detail: firstLine(version), State: Pass})
@@ -56,8 +61,7 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 	target, err := adb.Discover(ctx, s.ADB, adb.SelectionOptions{PreferUSB: cfg.Connection.PreferUSB, Target: selector})
 	if err != nil {
 		report.Checks = append(report.Checks, Check{Name: "Galaxy", Detail: discoveryDetail(err), State: Fail})
-		report.Summary = notReadySummary
-		s.addOptionalHostChecks(ctx, &report)
+		s.finish(ctx, cfg, &report, false)
 		return report
 	}
 	info := target.Info()
@@ -102,34 +106,72 @@ func (s Service) Run(ctx context.Context, cfg config.Config, selector string) Re
 		}
 	}
 
-	report.Ready = requiredReady
-	if report.Ready {
-		report.Summary = "Read mode ready. Sending not implemented yet."
-	} else {
-		report.Summary = notReadySummary
-	}
-	s.addOptionalHostChecks(ctx, &report)
+	s.finish(ctx, cfg, &report, requiredReady)
 	return report
 }
 
-const notReadySummary = "Read mode not ready. Enable USB debugging or connect an already-paired Wireless Debugging device."
-
-func (s Service) addOptionalHostChecks(ctx context.Context, report *Report) {
+func (s Service) finish(ctx context.Context, cfg config.Config, report *Report, readReady bool) {
 	if _, err := s.ADB.MDNSServices(ctx); err != nil {
 		report.Checks = append(report.Checks, Check{Name: "Wireless discovery", Detail: "unavailable", State: Info})
 	} else {
 		report.Checks = append(report.Checks, Check{Name: "Wireless discovery", Detail: "available", State: Info})
 	}
+
+	sendPrerequisites := true
 	if s.InspectScrcpy == nil {
-		report.Checks = append(report.Checks, Check{Name: "scrcpy", Detail: "not inspected", State: Info})
-		return
+		s.InspectScrcpy = scrcpy.Inspect
 	}
 	info, err := s.InspectScrcpy(ctx, "")
 	if err != nil {
-		report.Checks = append(report.Checks, Check{Name: "scrcpy", Detail: "not installed", State: Info})
-		return
+		report.Checks = append(report.Checks, Check{Name: "scrcpy", Detail: "not installed", State: Fail})
+		sendPrerequisites = false
+	} else {
+		report.Checks = append(report.Checks, Check{Name: "scrcpy", Detail: info.Version, State: Pass})
 	}
-	report.Checks = append(report.Checks, Check{Name: "scrcpy", Detail: info.Version, State: Pass})
+
+	lookPath := s.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	clipboardReady := true
+	for _, name := range []string{"pbcopy", "pbpaste"} {
+		if _, err := lookPath(name); err != nil {
+			clipboardReady = false
+		}
+	}
+	if clipboardReady {
+		report.Checks = append(report.Checks, Check{Name: "macOS clipboard", Detail: "pbcopy and pbpaste available", State: Pass})
+	} else {
+		report.Checks = append(report.Checks, Check{Name: "macOS clipboard", Detail: "pbcopy or pbpaste unavailable", State: Fail})
+		sendPrerequisites = false
+	}
+
+	layout := samsung.Layout{
+		Width: cfg.Samsung.DisplayWidth, Height: cfg.Samsung.DisplayHeight,
+		Composer: samsung.Point{X: cfg.Samsung.Layout.ComposerX, Y: cfg.Samsung.Layout.ComposerY},
+		Send:     samsung.Point{X: cfg.Samsung.Layout.SendX, Y: cfg.Samsung.Layout.SendY},
+	}
+	if err := layout.Validate(); err != nil || cfg.Samsung.ClipboardSyncDelay.Duration <= 0 || cfg.Samsung.SendSettleDelay.Duration <= 0 || cfg.Samsung.VerificationTimeout.Duration <= 0 {
+		report.Checks = append(report.Checks, Check{Name: "Virtual Display prerequisites", Detail: "invalid Samsung layout or timing", State: Fail})
+		sendPrerequisites = false
+	} else {
+		report.Checks = append(report.Checks, Check{Name: "Virtual Display prerequisites", Detail: fmt.Sprintf("%dx%d layout configured", layout.Width, layout.Height), State: Pass})
+	}
+	setReadiness(report, readReady, readReady && sendPrerequisites)
+}
+
+func setReadiness(report *Report, readReady, sendReady bool) {
+	report.ReadReady = readReady
+	report.SendReady = sendReady
+	report.Ready = readReady
+	readLabel, sendLabel := "not ready", "not ready"
+	if readReady {
+		readLabel = "ready"
+	}
+	if sendReady {
+		sendLabel = "ready"
+	}
+	report.Summary = fmt.Sprintf("Read: %s\nSend: %s", readLabel, sendLabel)
 }
 
 func firstLine(value string) string {

@@ -15,7 +15,8 @@ type Check struct {
 }
 
 type Report struct {
-	Checks  []Check
-	Ready   bool
-	Summary string
+	Checks               []Check
+	ReadReady, SendReady bool
+	Ready                bool
+	Summary              string
 }

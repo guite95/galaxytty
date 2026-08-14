@@ -20,6 +20,7 @@ type fakeADB struct {
 	packageInstalled bool
 	providerOutput   map[string][]byte
 	contentCalls     [][]string
+	shellCalls       [][]string
 	mdnsErr          error
 }
 
@@ -53,6 +54,7 @@ func (f *fakeADB) Shell(_ context.Context, target string, args ...string) ([]byt
 	if len(f.devices) > 0 && target != f.devices[0].Target {
 		return nil, fmt.Errorf("unexpected target %q", target)
 	}
+	f.shellCalls = append(f.shellCalls, append([]string(nil), args...))
 	key := strings.Join(args, " ")
 	switch key {
 	case "getprop ro.product.manufacturer":
@@ -87,9 +89,10 @@ func TestDoctorReadyUsesOnlyNonSensitiveProjections(t *testing.T) {
 				InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
 					return scrcpy.VersionInfo{Path: "/synthetic/scrcpy", Version: "4.1"}, nil
 				},
+				LookPath: func(name string) (string, error) { return "/synthetic/" + name, nil },
 			}
 			report := service.Run(context.Background(), config.Default(), "")
-			if !report.Ready || report.Summary != "Read mode ready. Sending not implemented yet." {
+			if !report.Ready || !report.ReadReady || !report.SendReady || !strings.Contains(report.Summary, "Read: ready") || !strings.Contains(report.Summary, "Send: ready") {
 				t.Fatalf("report=%+v", report)
 			}
 			if check := findCheck(report, "Connection"); check.Detail != expectedConnectionLabel(connection) || check.State != Pass {
@@ -101,6 +104,11 @@ func TestDoctorReadyUsesOnlyNonSensitiveProjections(t *testing.T) {
 					if strings.Contains(projection, forbidden) {
 						t.Fatalf("sensitive doctor projection %q", projection)
 					}
+				}
+			}
+			for _, call := range backend.shellCalls {
+				if len(call) > 0 && (call[0] == "am" || call[0] == "input") {
+					t.Fatalf("doctor executed mutating call %q", call)
 				}
 			}
 		})
@@ -144,7 +152,7 @@ func TestDoctorReportsADBAndSelectionFailures(t *testing.T) {
 	}
 }
 
-func TestDoctorTreatsMDNSAndScrcpyAsInformational(t *testing.T) {
+func TestDoctorKeepsReadReadyWhenSendToolsAreMissing(t *testing.T) {
 	backend := readyADB(domain.ConnectionUSB)
 	backend.mdnsErr = errors.New("mdns unavailable")
 	report := (Service{
@@ -152,8 +160,28 @@ func TestDoctorTreatsMDNSAndScrcpyAsInformational(t *testing.T) {
 		InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
 			return scrcpy.VersionInfo{}, errors.New("scrcpy missing")
 		},
+		LookPath: func(name string) (string, error) { return "/synthetic/" + name, nil },
 	}).Run(context.Background(), config.Default(), "")
-	if !report.Ready || findCheck(report, "Wireless discovery").State != Info || findCheck(report, "scrcpy").State != Info {
+	if !report.Ready || !report.ReadReady || report.SendReady || findCheck(report, "Wireless discovery").State != Info || findCheck(report, "scrcpy").State != Fail {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestDoctorMissingClipboardBlocksOnlySendReadiness(t *testing.T) {
+	backend := readyADB(domain.ConnectionUSB)
+	report := (Service{
+		ADB: backend,
+		InspectScrcpy: func(context.Context, string) (scrcpy.VersionInfo, error) {
+			return scrcpy.VersionInfo{Path: "/synthetic/scrcpy", Version: "4.1"}, nil
+		},
+		LookPath: func(name string) (string, error) {
+			if name == "pbpaste" {
+				return "", errors.New("missing")
+			}
+			return "/synthetic/" + name, nil
+		},
+	}).Run(context.Background(), config.Default(), "")
+	if !report.ReadReady || report.SendReady || findCheck(report, "macOS clipboard").State != Fail || !strings.Contains(report.Summary, "Send: not ready") {
 		t.Fatalf("report=%+v", report)
 	}
 }

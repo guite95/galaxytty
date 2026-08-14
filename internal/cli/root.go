@@ -82,7 +82,7 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 	}
 	if command == "doctor" {
 		if opts.mock {
-			fmt.Fprintln(out, "GalaxyTTY Doctor\n\n✓ mock adapters          ready\n✓ SMS Provider fixture   accessible\n✓ Virtual Display fake   supported\n\nConnection:\n  Mock\n\nReady.")
+			fmt.Fprintln(out, "GalaxyTTY Doctor\n\n✓ mock adapters          ready\n✓ SMS Provider fixture   accessible\n✓ Virtual Display fake   supported\n\nConnection:\n  Mock\n\nRead: ready\nSend: ready")
 			return nil
 		}
 		report := deps.doctor(ctx, cfg, opts.device)

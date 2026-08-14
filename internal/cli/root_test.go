@@ -38,6 +38,13 @@ func TestMockCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestMockDoctorReportsReadAndSendReady(t *testing.T) {
+	output, err := run(t, "doctor", "--mock")
+	if err != nil || !strings.Contains(output, "Read: ready") || !strings.Contains(output, "Send: ready") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
 func TestJSONOnly(t *testing.T) {
 	for _, a := range [][]string{
 		{"conversations", "--mock", "--json"},
@@ -204,17 +211,31 @@ func TestDoctorFormatsStructuredChecks(t *testing.T) {
 				{Name: "adb", Detail: "/synthetic/adb", State: doctor.Pass},
 				{Name: "RCS", Detail: "deferred", State: doctor.Info},
 			},
-			Ready: true, Summary: "Read mode ready. Sending not implemented yet.",
+			Ready: true, ReadReady: true, SendReady: true, Summary: "Read: ready\nSend: ready",
 		}
 	}}
 	var out bytes.Buffer
 	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor"}, deps); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"GalaxyTTY Doctor", "✓ adb", "○ RCS", "Read mode ready"} {
+	for _, want := range []string{"GalaxyTTY Doctor", "✓ adb", "○ RCS", "Read: ready", "Send: ready"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %q", want, out.String())
 		}
+	}
+}
+
+func TestDoctorDoesNotFailReadModeWhenOnlySendIsNotReady(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{doctor: func(context.Context, config.Config, string) doctor.Report {
+		return doctor.Report{Ready: true, ReadReady: true, SendReady: false, Summary: "Read: ready\nSend: not ready"}
+	}}
+	var out bytes.Buffer
+	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor"}, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Send: not ready") {
+		t.Fatalf("out=%q", out.String())
 	}
 }
 
