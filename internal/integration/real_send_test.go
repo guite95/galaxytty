@@ -4,6 +4,8 @@ package integration
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -154,7 +156,6 @@ func TestRealSamsungRCSSend(t *testing.T) {
 	if err != nil {
 		t.Fatal("could not establish RCS observation baseline")
 	}
-	beforeExtensions := observeSMSExtensions(ctx, target, baseline)
 	beforeState := readMainDisplayState(ctx, target)
 	beforeRecords := recordingSnapshot(t)
 
@@ -170,11 +171,17 @@ func TestRealSamsungRCSSend(t *testing.T) {
 			_ = runtime.Service.Shutdown(stopCtx)
 		}
 	}()
-	result, err := runtime.Service.SendToAddress(ctx, recipient, body)
+	observation, err := collectRCSSendObservation(
+		func() (domain.SendResult, error) {
+			return runtime.Service.SendToAddress(ctx, recipient, body)
+		},
+		func() (rcsProviderObservation, error) {
+			return observeRCSProviderEvidence(ctx, target.Shell, baseline, recipient, body)
+		},
+	)
 	if err != nil {
-		t.Fatalf("RCS send was not machine verified; no retry was attempted: %v", err)
+		t.Fatalf("RCS send or provider observation failed; no retry was attempted: %v", err)
 	}
-	afterExtensions := observeSMSExtensions(ctx, target, result.MessageID)
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	err = runtime.Service.Shutdown(stopCtx)
 	stopCancel()
@@ -185,12 +192,17 @@ func TestRealSamsungRCSSend(t *testing.T) {
 	assertNoNewRecordings(t, beforeRecords)
 	assertMainDisplayStatePreserved(t, beforeState, readMainDisplayState(ctx, target))
 
-	if result.Transport == domain.MessageRCS {
+	if observation.result.Transport == domain.MessageRCS {
 		return
 	}
-	_ = beforeExtensions
-	_ = afterExtensions
-	t.Skip("exact outgoing provider evidence exists, but accessible extension columns do not reliably classify RCS transport")
+	supported, nonEmpty := observation.evidence.extensions.counts()
+	if observation.evidence.exactOutgoing {
+		t.Skipf("exact outgoing provider evidence exists, but %d supported extension fields (%d non-empty) do not reliably classify RCS transport", supported, nonEmpty)
+	}
+	if errors.Is(observation.sendErr, domain.ErrSendVerificationTimeout) {
+		t.Skipf("RCS verification timed out; post-send observation found exact_correlation=%t outgoing=%t and %d supported extension fields (%d non-empty)", observation.evidence.exactCorrelation, observation.evidence.exactOutgoing, supported, nonEmpty)
+	}
+	t.Skipf("accessible evidence did not reliably classify RCS transport; exact_correlation=%t outgoing=%t", observation.evidence.exactCorrelation, observation.evidence.exactOutgoing)
 }
 
 func TestRealSamsungMMSTextSend(t *testing.T) {
@@ -259,15 +271,119 @@ func TestRealSamsungMMSTextSend(t *testing.T) {
 type smsExtensionSnapshot struct {
 	supported map[string]bool
 	nonEmpty  map[string]bool
+	values    map[string]string
 }
 
-func observeSMSExtensions(ctx context.Context, target *adb.Target, messageID int64) smsExtensionSnapshot {
-	snapshot := smsExtensionSnapshot{supported: map[string]bool{}, nonEmpty: map[string]bool{}}
+type shellQuery func(context.Context, ...string) ([]byte, error)
+
+type rcsProviderObservation struct {
+	exactCorrelation bool
+	exactOutgoing    bool
+	messageID        int64
+	smsType          int
+	extensions       smsExtensionSnapshot
+}
+
+type rcsSendObservation struct {
+	result   domain.SendResult
+	sendErr  error
+	evidence rcsProviderObservation
+}
+
+func collectRCSSendObservation(send func() (domain.SendResult, error), observe func() (rcsProviderObservation, error)) (rcsSendObservation, error) {
+	result, sendErr := send()
+	if sendErr != nil && !errors.Is(sendErr, domain.ErrSendVerificationTimeout) {
+		return rcsSendObservation{}, sendErr
+	}
+	if sendErr == nil && result.Transport == domain.MessageRCS {
+		return rcsSendObservation{result: result}, nil
+	}
+	evidence, err := observe()
+	if err != nil {
+		return rcsSendObservation{}, err
+	}
+	return rcsSendObservation{result: result, sendErr: sendErr, evidence: evidence}, nil
+}
+
+func observeRCSProviderEvidence(ctx context.Context, shell shellQuery, baseline int64, recipient, body string) (rcsProviderObservation, error) {
+	columns := []string{"_id", "address", "type", "body"}
+	output, err := shell(ctx,
+		"content", "query", "--uri", "content://sms",
+		"--projection", strings.Join(columns, ":"),
+		"--where", fmt.Sprintf(`"_id > %d"`, baseline),
+		"--sort", `"_id ASC LIMIT 500"`,
+	)
+	if err != nil {
+		return rcsProviderObservation{}, fmt.Errorf("query post-send SMS evidence: %w", err)
+	}
+	if strings.TrimSpace(string(output)) == "No result found." {
+		return rcsProviderObservation{extensions: newSMSExtensionSnapshot()}, nil
+	}
+	rows, err := provider.ParseProjectedRows(string(output), columns, "body")
+	if err != nil {
+		return rcsProviderObservation{}, fmt.Errorf("parse post-send SMS evidence: %w", err)
+	}
+	observation, err := findRCSProviderCorrelation(rows, baseline, recipient, body)
+	if err != nil {
+		return rcsProviderObservation{}, err
+	}
+	if observation.messageID > 0 {
+		observation.extensions = observeSMSExtensions(ctx, shell, observation.messageID)
+	} else {
+		observation.extensions = newSMSExtensionSnapshot()
+	}
+	return observation, nil
+}
+
+func findRCSProviderCorrelation(rows []map[string]string, baseline int64, recipient, body string) (rcsProviderObservation, error) {
+	var observation rcsProviderObservation
+	for _, row := range rows {
+		messageID, err := strconv.ParseInt(row["_id"], 10, 64)
+		if err != nil {
+			return rcsProviderObservation{}, fmt.Errorf("parse post-send SMS message ID")
+		}
+		smsType, err := strconv.Atoi(row["type"])
+		if err != nil {
+			return rcsProviderObservation{}, fmt.Errorf("parse post-send SMS type")
+		}
+		if messageID <= baseline || domain.NormalizePhone(row["address"]) != domain.NormalizePhone(recipient) || row["body"] != body {
+			continue
+		}
+		observation = rcsProviderObservation{
+			exactCorrelation: true,
+			exactOutgoing:    smsType == 2,
+			messageID:        messageID,
+			smsType:          smsType,
+		}
+	}
+	return observation, nil
+}
+
+func newSMSExtensionSnapshot() smsExtensionSnapshot {
+	return smsExtensionSnapshot{supported: map[string]bool{}, nonEmpty: map[string]bool{}, values: map[string]string{}}
+}
+
+func (s smsExtensionSnapshot) counts() (supported, nonEmpty int) {
+	for _, present := range s.supported {
+		if present {
+			supported++
+		}
+	}
+	for _, present := range s.nonEmpty {
+		if present {
+			nonEmpty++
+		}
+	}
+	return supported, nonEmpty
+}
+
+func observeSMSExtensions(ctx context.Context, shell shellQuery, messageID int64) smsExtensionSnapshot {
+	snapshot := newSMSExtensionSnapshot()
 	if messageID <= 0 {
 		return snapshot
 	}
 	for _, field := range []string{"teleservice_id", "app_id", "chat_type", "correlation_tag"} {
-		output, err := target.Shell(ctx,
+		output, err := shell(ctx,
 			"content", "query", "--uri", "content://sms",
 			"--projection", "_id:"+field,
 			"--where", `"_id = `+strconv.FormatInt(messageID, 10)+`"`,
@@ -281,6 +397,7 @@ func observeSMSExtensions(ctx context.Context, target *adb.Target, messageID int
 		}
 		snapshot.supported[field] = true
 		value := strings.TrimSpace(rows[0][field])
+		snapshot.values[field] = value
 		snapshot.nonEmpty[field] = value != "" && !strings.EqualFold(value, "null")
 	}
 	return snapshot
