@@ -23,10 +23,17 @@ class ReplyDispatcher(
 ) {
     fun dispatch(threadId: Long, text: String): ReplyDispatchResult {
         val directResult = actions.dispatch(threadId, text)
-        return if (directResult.status == ReplyDispatchStatus.ACTION_UNAVAILABLE) {
-            fallback.prepare(threadId, text)
-        } else {
-            directResult
+        return when (directResult.status) {
+            ReplyDispatchStatus.ACTION_UNAVAILABLE -> fallback.prepare(threadId, text)
+            ReplyDispatchStatus.FAILED -> {
+                val fallbackResult = fallback.prepare(threadId, text)
+                if (fallbackResult.status == ReplyDispatchStatus.ACTION_UNAVAILABLE) {
+                    directResult
+                } else {
+                    fallbackResult
+                }
+            }
+            else -> directResult
         }
     }
 }

@@ -377,7 +377,8 @@ class GalaxyTcpServer(
                                     type = ProtocolTypes.REPLY_CAPABILITY,
                                     requestId = request.requestId,
                                     payload = JSONObject()
-                                        .put("available", replyActions.available(threadId)),
+                                        .put("available", replyActions.available(threadId))
+                                        .put("cachedAvailable", replyActions.cachedAvailable(threadId)),
                                 ),
                             )
                         }

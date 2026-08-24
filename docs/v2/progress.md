@@ -269,3 +269,11 @@ consumed and does not authorize any additional real SMS/RCS/MMS send.
   Notification phone URIs and Provider addresses remain Helper-only and the
   notification itself contains neither recipient nor body. Automated tests do
   not post the notification or invoke its PendingIntent.
+- Helper `0.13.0-poc` changes Samsung notification removal from immediate reply
+  action deletion to a 24-hour bounded, process-memory-only retained state.
+  Active actions remain preferred; retained actions expose a distinct
+  structural capability and evidence string, require Samsung creator identity,
+  and are replaced by newer actions for the same thread. Rejected tokens are
+  evicted and fall through to the compose handoff. Automated tests use fake
+  actions only; actual retained-token RCS/SMS behavior remains a gated device
+  validation.

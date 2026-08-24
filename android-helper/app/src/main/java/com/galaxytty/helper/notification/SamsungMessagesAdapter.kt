@@ -31,6 +31,9 @@ class SamsungMessagesAdapter(
                     .orEmpty()
                 if (inputs.isEmpty()) return@mapNotNull null
                 val pendingIntent = action.actionIntent ?: return@mapNotNull null
+                if (pendingIntent.creatorPackage != NotificationAnalyzer.SAMSUNG_MESSAGES_PACKAGE) {
+                    return@mapNotNull null
+                }
                 val replyPriority = if (
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                     action.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY

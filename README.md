@@ -129,9 +129,17 @@ later appears, it replaces the local echo. The echo is never persisted as proof
 of delivery.
 
 If the selected conversation no longer has an active RemoteInput action, the
-Helper reuses its existing one-to-one conversation data to prepare a Samsung
-Messages `ACTION_SENDTO` composer. Android does not allow the background bridge
-to open that activity directly, so the Helper posts a generic local notification.
+Helper first tries a genuine Samsung reply action retained for up to 24 hours
+after its notification disappeared. The action stays bounded and memory-only,
+must have been created by Samsung Messages, and is replaced by a newer action
+for the same conversation. Acceptance remains `accepted_unverified`; a retained
+action is not delivery evidence. Samsung may cancel its action at any time, and
+no action survives a Helper process restart.
+
+If no valid active or retained action exists, the Helper reuses its existing
+one-to-one conversation data to prepare a Samsung Messages `ACTION_SENDTO`
+composer. Android does not allow the background bridge to open that activity
+directly, so the Helper posts a generic local notification.
 Tapping it opens Samsung Messages with the reply prefilled; the user reviews it
 and taps Samsung's send button. The protocol reports `user_action_required`, the
 Mac does not draw an outgoing bubble, and neither the phone number nor message
@@ -157,6 +165,10 @@ checks for exact outgoing SMS Provider evidence without printing private data.
 `GALAXYTTY_ALLOW_SOLE_ACTIVE_REPLY=1` is needed only when Samsung does not
 export the user-visible target label verbatim; it allows selection only when
 exactly one active reply-capable notification exists.
+Testing a retained action additionally requires
+`GALAXYTTY_ALLOW_RETAINED_REPLY=1`; the normal active-action test remains the
+default. Neither flag replaces the device, send, exact-recipient, and exact-text
+gates.
 No Provider match means the result remains unverified; it is not evidence of
 RCS delivery.
 

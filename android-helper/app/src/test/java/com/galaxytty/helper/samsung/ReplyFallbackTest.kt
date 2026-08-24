@@ -43,6 +43,42 @@ class ReplyFallbackTest {
     }
 
     @Test
+    fun rejectedRetainedActionFallsBackToComposeHandoff() {
+        var fallbackCalls = 0
+        val actions = ReplyActionRegistry(policy = ReplyExecutionPolicy { true })
+        actions.register("opaque-notification", 7) {
+            throw IllegalStateException("canceled token")
+        }
+        actions.markInactive("opaque-notification")
+        val dispatcher = ReplyDispatcher(
+            actions = actions,
+            fallback = ReplyFallback { _, _ ->
+                fallbackCalls++
+                ReplyDispatchResult(ReplyDispatchStatus.USER_ACTION_REQUIRED)
+            },
+        )
+
+        assertEquals(ReplyDispatchStatus.USER_ACTION_REQUIRED, dispatcher.dispatch(7, "synthetic").status)
+        assertEquals(1, fallbackCalls)
+        assertFalse(actions.cachedAvailable(7))
+    }
+
+    @Test
+    fun rejectedActionKeepsOriginalFailureWhenComposeTargetIsUnavailable() {
+        val actions = ReplyActionRegistry(policy = ReplyExecutionPolicy { true })
+        actions.register("opaque-notification", 7) {
+            throw IllegalStateException("private detail")
+        }
+        val dispatcher = ReplyDispatcher(actions = actions)
+
+        val result = dispatcher.dispatch(7, "synthetic")
+
+        assertEquals(ReplyDispatchStatus.FAILED, result.status)
+        assertTrue(result.error?.contains("IllegalStateException") == true)
+        assertFalse(result.error?.contains("private detail") == true)
+    }
+
+    @Test
     fun preparesComposeHandoffWithoutClaimingSendSuccess() {
         var publishedAddress = ""
         var publishedText = ""

@@ -143,9 +143,12 @@ also retain a fresh private one-shot marker for deliberately gated integration
 tests.
 
 `GET_REPLY_CAPABILITY` accepts only an opaque `threadId` and returns a correlated
-`REPLY_CAPABILITY` containing `available: true|false`. It reveals no title,
-number, body, action key, or execution-gate state and does not consume the
-one-shot marker.
+`REPLY_CAPABILITY` containing `available: true|false` and
+`cachedAvailable: true|false`. `available` means the Samsung notification is
+currently active. `cachedAvailable` means a genuine Samsung action was retained
+after its notification disappeared and has not reached its 24-hour TTL. The
+response reveals no title, number, body, action key, or execution-gate state and
+does not consume the one-shot marker.
 
 `SEND_REPLY` addresses the selected opaque conversation rather than a transport
 or recipient. An active notification action is preferred when available:
@@ -171,6 +174,13 @@ visibly reports that delivery remains unverified. The application service keeps
 a session-only outgoing echo so an RCS reply does not disappear when the Helper
 history has no outgoing record. It is reconciled only against a matching,
 time-bounded outgoing source record and is never treated as delivery evidence.
+
+A retained Samsung action uses the same outcome with
+`retained_remote_input_pending_intent_accepted` evidence. Samsung can cancel the
+underlying PendingIntent; rejection evicts it and attempts the compose handoff.
+The retained action is bounded, memory-only, and cannot help a conversation
+whose reply-capable notification was never observed by the current Helper
+process.
 
 When no active RemoteInput action exists, a locally authorized request may use
 the Helper's existing one-to-one conversation address to post a generic compose

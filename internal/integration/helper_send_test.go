@@ -24,8 +24,8 @@ func TestRealHelperReplyTargetReadOnly(t *testing.T) {
 	target := requirePrivateTestValue(t, "GALAXYTTY_TEST_RECIPIENT")
 	client := connectRealHelper(t)
 	conversation := resolveReplyTarget(t, client, target)
-	requireReplyCapability(t, client, conversation.ThreadID)
-	t.Log("the authorized target resolves to exactly one active RemoteInput reply action")
+	capability := requireReplyCapability(t, client, conversation.ThreadID)
+	t.Logf("the authorized target resolves to exactly one %s RemoteInput reply action", capability)
 }
 
 func TestRealHelperReplySend(t *testing.T) {
@@ -132,11 +132,11 @@ func resolveReplyTarget(t *testing.T, client *remote.Client, target string) doma
 
 	active := make([]domain.Conversation, 0, 1)
 	for _, conversation := range conversations {
-		available, err := replyCapability(client, conversation.ThreadID)
+		capability, err := replyCapability(client, conversation.ThreadID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if available {
+		if capability.Available {
 			active = append(active, conversation)
 		}
 	}
@@ -197,34 +197,45 @@ func TestMatchExactTargetRejectsAmbiguousAndPartialNames(t *testing.T) {
 	}
 }
 
-func requireReplyCapability(t *testing.T, client *remote.Client, threadID int64) {
+func requireReplyCapability(t *testing.T, client *remote.Client, threadID int64) string {
 	t.Helper()
-	available, err := replyCapability(client, threadID)
+	capability, err := replyCapability(client, threadID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !available {
-		t.Fatal("target conversation has no active RemoteInput reply action")
+	if capability.Available {
+		return "active"
 	}
+	if capability.CachedAvailable {
+		if os.Getenv("GALAXYTTY_ALLOW_RETAINED_REPLY") != "1" {
+			t.Fatal("target has only a retained RemoteInput action; set GALAXYTTY_ALLOW_RETAINED_REPLY=1 to authorize that exact test path")
+		}
+		return "retained"
+	}
+	t.Fatal("target conversation has no active or retained RemoteInput reply action")
+	return ""
 }
 
-func replyCapability(client *remote.Client, threadID int64) (bool, error) {
+type replyCapabilityPayload struct {
+	Available       bool `json:"available"`
+	CachedAvailable bool `json:"cachedAvailable"`
+}
+
+func replyCapability(client *remote.Client, threadID int64) (replyCapabilityPayload, error) {
 	response, err := client.Request(context.Background(), protocol.TypeGetReplyCapability, map[string]any{
 		"threadId": threadID,
 	})
 	if err != nil {
-		return false, err
+		return replyCapabilityPayload{}, err
 	}
 	if response.Type != protocol.TypeReplyCapability {
-		return false, errors.New("unexpected reply capability response")
+		return replyCapabilityPayload{}, errors.New("unexpected reply capability response")
 	}
-	var payload struct {
-		Available bool `json:"available"`
-	}
+	var payload replyCapabilityPayload
 	if err := response.DecodePayload(&payload); err != nil {
-		return false, err
+		return replyCapabilityPayload{}, err
 	}
-	return payload.Available, nil
+	return payload, nil
 }
 
 func requirePrivateTestValue(t *testing.T, name string) string {

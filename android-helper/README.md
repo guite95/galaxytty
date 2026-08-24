@@ -179,3 +179,13 @@ offers a `PendingIntent` that opens Samsung Messages with the body prefilled.
 Android still requires the user to tap that notification and Samsung's send
 button. The result is `user_action_required`, not accepted or verified, and no
 address or body is serialized or logged.
+
+Helper `0.13.0-poc` retains genuine Samsung-created RemoteInput actions for up
+to 24 hours after their visible notifications disappear. A retained action is
+bounded, process-memory-only, and replaced when a newer action arrives for the
+same conversation. The Helper verifies the PendingIntent creator package before
+registration. A canceled or rejected token is evicted and falls through to the
+compose handoff; successful submission reports
+`retained_remote_input_pending_intent_accepted`, still as
+`accepted_unverified`. Conversations never observed with a reply-capable
+Samsung notification have no retained action.

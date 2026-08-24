@@ -136,6 +136,7 @@ class MainActivity : Activity() {
         val bridgeNotification = if (hasBridgeNotificationPermission()) "granted" else "required"
         val smsHistory = if (hasSmsHistoryPermission()) "granted" else "required"
         val remoteRepliesAllowed = RemoteReplyPreferences.allowed(this)
+        val replyActions = BridgeRuntime.replyActionCounts()
         remoteReplyButton.text = getString(
             if (remoteRepliesAllowed) R.string.block_remote_replies else R.string.allow_remote_replies,
         )
@@ -160,6 +161,7 @@ class MainActivity : Activity() {
             }
             appendLine("Samsung notifications observed: ${observations.size}")
             appendLine("Paired Mac replies: ${if (remoteRepliesAllowed) "allowed" else "blocked"}")
+            appendLine("Samsung reply actions: ${replyActions.active} active · ${replyActions.cached} retained")
             appendLine("No-active-notification fallback: Samsung compose notification for resolvable 1:1 conversations")
             appendLine("Debug one-shot reply: ${if (BridgeRuntime.replyTestArmed()) "armed" else "not armed"}")
             appendLine("Local TCP port: ${BridgeRuntime.port() ?: "stopped"}")

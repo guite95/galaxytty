@@ -69,6 +69,8 @@ object BridgeRuntime {
 
     fun replyTestArmed(): Boolean = oneShotReplyExecution?.isArmed() == true
 
+    fun replyActionCounts() = replies.counts()
+
     fun publish(observation: NotificationObservation) {
         observation.message?.let { message ->
             notificationTargets.register(message.threadId, message.replyAddress)
@@ -79,15 +81,13 @@ object BridgeRuntime {
 
     fun updateReply(notificationKey: String, threadId: Long?, action: ReplyAction?) {
         if (threadId == null || action == null) {
-            replies.unregister(notificationKey)
+            replies.markInactive(notificationKey)
             return
         }
         replies.register(notificationKey, threadId, action)
     }
 
-    fun unregisterReply(notificationKey: String) {
-        replies.unregister(notificationKey)
-    }
+    fun markReplyInactive(notificationKey: String): Boolean = replies.markInactive(notificationKey)
 
     @Synchronized
     fun stop() {

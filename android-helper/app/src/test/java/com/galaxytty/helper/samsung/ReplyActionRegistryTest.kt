@@ -33,7 +33,7 @@ class ReplyActionRegistryTest {
     }
 
     @Test
-    fun validatesRequestsAndRemovesExpiredNotificationActions() {
+    fun validatesRequestsAndSupportsExplicitRemoval() {
         val registry = ReplyActionRegistry(policy = ReplyExecutionPolicy { true })
         registry.register("opaque-notification", 7) {}
 
@@ -43,6 +43,82 @@ class ReplyActionRegistryTest {
 
         assertFalse(registry.available(7))
         assertEquals(ReplyDispatchStatus.ACTION_UNAVAILABLE, registry.dispatch(7, "reply").status)
+    }
+
+    @Test
+    fun removedNotificationActionRemainsAvailableAsRetainedCapability() {
+        var now = 10_000L
+        var deliveredText = ""
+        val registry = ReplyActionRegistry(
+            policy = ReplyExecutionPolicy { true },
+            retainedActionTtlMillis = 1_000,
+            nowMillis = { now },
+        )
+        registry.register("opaque-notification", 7) { text -> deliveredText = text }
+
+        assertTrue(registry.markInactive("opaque-notification"))
+        assertFalse(registry.available(7))
+        assertTrue(registry.cachedAvailable(7))
+        assertEquals(ReplyActionCounts(active = 0, cached = 1), registry.counts())
+
+        now += 500
+        val result = registry.dispatch(7, "synthetic retained reply")
+
+        assertEquals(ReplyDispatchStatus.ACCEPTED_UNVERIFIED, result.status)
+        assertEquals("retained_remote_input_pending_intent_accepted", result.evidence)
+        assertEquals("synthetic retained reply", deliveredText)
+        assertTrue(registry.cachedAvailable(7))
+    }
+
+    @Test
+    fun retainedActionExpiresFromRemovalTimeButActiveActionDoesNot() {
+        var now = 1_000L
+        val registry = ReplyActionRegistry(
+            policy = ReplyExecutionPolicy { true },
+            retainedActionTtlMillis = 1_000,
+            nowMillis = { now },
+        )
+        registry.register("retained-notification", 7) {}
+        registry.register("active-notification", 8) {}
+        registry.markInactive("retained-notification")
+
+        now += 999
+        assertTrue(registry.cachedAvailable(7))
+        assertTrue(registry.available(8))
+
+        now += 1
+        assertFalse(registry.cachedAvailable(7))
+        assertEquals(ReplyDispatchStatus.ACTION_UNAVAILABLE, registry.dispatch(7, "reply").status)
+        assertTrue(registry.available(8))
+    }
+
+    @Test
+    fun freshNotificationReplacesRetainedActionForTheSameThread() {
+        val invoked = mutableListOf<String>()
+        val registry = ReplyActionRegistry(policy = ReplyExecutionPolicy { true })
+        registry.register("old-notification", 7) { invoked += "old" }
+        registry.markInactive("old-notification")
+
+        registry.register("new-notification", 7) { invoked += "new" }
+
+        assertTrue(registry.available(7))
+        assertFalse(registry.cachedAvailable(7))
+        assertEquals(ReplyDispatchStatus.ACCEPTED_UNVERIFIED, registry.dispatch(7, "reply").status)
+        assertEquals(listOf("new"), invoked)
+    }
+
+    @Test
+    fun disabledPolicyDoesNotConsumeRetainedAction() {
+        var allowed = false
+        val registry = ReplyActionRegistry(policy = ReplyExecutionPolicy { allowed })
+        registry.register("opaque-notification", 7) {}
+        registry.markInactive("opaque-notification")
+
+        assertEquals(ReplyDispatchStatus.DISABLED, registry.dispatch(7, "reply").status)
+        assertTrue(registry.cachedAvailable(7))
+
+        allowed = true
+        assertEquals(ReplyDispatchStatus.ACCEPTED_UNVERIFIED, registry.dispatch(7, "reply").status)
     }
 
     @Test
@@ -70,5 +146,7 @@ class ReplyActionRegistryTest {
         assertEquals(ReplyDispatchStatus.FAILED, result.status)
         assertTrue(result.error?.contains("IllegalStateException") == true)
         assertFalse(result.error?.contains("private implementation detail") == true)
+        assertFalse(registry.available(7))
+        assertFalse(registry.cachedAvailable(7))
     }
 }

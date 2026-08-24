@@ -66,17 +66,23 @@ continue to resolve a one-to-one participant and use their existing address
 path.
 
 The Helper owns every Samsung-specific object. It retains a bounded mapping from
-thread ID to an active free-form RemoteInput action and removes it with the
-notification. Reply execution defaults to blocked in every build. The Galaxy
-user may enable or revoke normal replies through a persistent local preference;
-the preference is evaluated at every dispatch. Debug builds may additionally
-consume one private-file marker that expires after 60 seconds and is deleted
-before the action runs.
+thread ID to a free-form RemoteInput action. Notification removal changes that
+action from active to a 24-hour, process-memory-only retained state rather than
+deleting it immediately. Reply execution defaults to blocked in every build.
+The Galaxy user may enable or revoke normal replies through a persistent local
+preference; the preference is evaluated at every dispatch. Debug builds may
+additionally consume one private-file marker that expires after 60 seconds and
+is deleted before the action runs.
 The Mac test also requires explicit environment gates and an authenticated
 capability preflight. PendingIntent acceptance is `accepted_unverified` until
 independent outgoing evidence exists.
 
-If that active action has expired, the Helper may resolve the selected opaque
+If the visible notification disappeared, the Helper first tries its retained
+Samsung-created reply PendingIntent. A newer action for the same thread replaces
+it, creator-package checks reject non-Samsung tokens, and an execution exception
+evicts it. Accepted retained actions are still unverified.
+
+If no valid retained action exists, the Helper may resolve the selected opaque
 thread through the existing one-to-one SMS Provider conversation or a safe
 phone URI retained from its notification. It posts a privacy-safe local
 notification whose activity PendingIntent opens Samsung Messages with an
@@ -100,6 +106,7 @@ GALAXYTTY_ENABLE_SEND_TEST=1
 GALAXYTTY_TEST_RECIPIENT=...
 GALAXYTTY_TEST_TEXT=...
 GALAXYTTY_ALLOW_SOLE_ACTIVE_REPLY=1  # only when the label is not exported verbatim
+GALAXYTTY_ALLOW_RETAINED_REPLY=1     # only when deliberately testing a retained action
 ```
 
 Send success must describe the evidence actually observed. In particular, an

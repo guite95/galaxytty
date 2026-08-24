@@ -34,7 +34,7 @@ cleanup_gate() {
 trap cleanup_gate EXIT HUP INT TERM
 
 cleanup_gate
-echo "Checking the authorized target and active reply capability without sending..."
+echo "Checking the authorized target and active/retained reply capability without sending..."
 go test -count=1 -tags=integration ./internal/integration -run '^TestRealHelperReplyTargetReadOnly$' -v
 
 echo "Arming one debug-only RemoteInput execution for at most 60 seconds..."

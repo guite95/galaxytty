@@ -28,8 +28,11 @@ class GalaxyNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(statusBarNotification: StatusBarNotification) {
         if (statusBarNotification.packageName != NotificationAnalyzer.SAMSUNG_MESSAGES_PACKAGE) return
-        BridgeRuntime.unregisterReply(statusBarNotification.key)
-        Log.i(TAG, "notification removed key=${SafeFingerprint.of(statusBarNotification.key)}")
+        val retained = BridgeRuntime.markReplyInactive(statusBarNotification.key)
+        Log.i(
+            TAG,
+            "notification removed key=${SafeFingerprint.of(statusBarNotification.key)} replyActionRetained=$retained",
+        )
     }
 
     private fun observe(statusBarNotification: StatusBarNotification) {
