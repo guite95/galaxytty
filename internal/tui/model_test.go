@@ -172,6 +172,44 @@ func TestSlashCommands(t *testing.T) {
 	}
 }
 
+func TestSearchSelectsConversationAndCyclesMatches(t *testing.T) {
+	m, _ := fixture(t)
+	m.conversations = []domain.Conversation{
+		{ThreadID: 1, Title: "장욱", Snippet: "저녁 약속"},
+		{ThreadID: 2, Title: "김철수", Snippet: "프로젝트 저녁 회의"},
+		{ThreadID: 3, Title: "엄마", Snippet: "집에 언제 와?"},
+	}
+	m = typeText(m, "/search 저녁")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.cursor != 0 || m.composer.Value() != "" || m.errorText != "" {
+		t.Fatalf("first search cursor=%d composer=%q error=%q", m.cursor, m.composer.Value(), m.errorText)
+	}
+	m = typeText(m, "/search 저녁")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("repeated search cursor=%d", m.cursor)
+	}
+}
+
+func TestSearchMovesChatAnchorUsingKoreanAndEmoji(t *testing.T) {
+	m := historyModel(t, 4)
+	m.messages[0].Body = "첫 메시지 😀"
+	m.messages[2].Body = "한글 검색 결과"
+	m = typeText(m, "/search 한글")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.chatOffset != 1 || m.errorText != "" {
+		t.Fatalf("chat offset=%d error=%q", m.chatOffset, m.errorText)
+	}
+	m = typeText(m, "/search 없음")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(updated.(Model).errorText, "No match") {
+		t.Fatalf("error=%q", updated.(Model).errorText)
+	}
+}
+
 func TestCtrlCShutsDown(t *testing.T) {
 	m, _ := fixture(t)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -283,8 +321,8 @@ func TestChatRendersLatestVisibleMessageWindow(t *testing.T) {
 	}
 	model.messages[len(model.messages)-1].Body = "Recent\nmessage"
 	rendered := model.renderChat(24, 10)
-	if !strings.Contains(rendered, "Recent message") {
-		t.Fatal("latest multiline message was not rendered as one line")
+	if !strings.Contains(rendered, "Recent") || !strings.Contains(rendered, "message") {
+		t.Fatal("latest multiline message was not rendered")
 	}
 	if strings.Contains(rendered, "Message 00") {
 		t.Fatal("off-screen message was rendered")

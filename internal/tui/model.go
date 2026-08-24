@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/domain"
 )
@@ -22,192 +20,103 @@ const (
 	chatScreen
 )
 
+const historyPageLimit = 200
+
 type conversationsMsg struct {
 	items []domain.Conversation
 	err   error
 }
+
 type messagesMsg struct {
-	items []domain.Message
-	err   error
+	threadID int64
+	items    []domain.Message
+	err      error
 }
+
+type olderMessagesMsg struct {
+	threadID int64
+	items    []domain.Message
+	err      error
+}
+
 type sentMsg struct {
 	result domain.SendResult
 	err    error
 }
+
 type pollMsg struct {
 	items []domain.Message
 	err   error
 }
+
+type eventStreamMsg struct {
+	messages <-chan domain.Message
+	errors   <-chan error
+}
+
+type messageEventMsg struct {
+	message domain.Message
+	err     error
+	closed  bool
+}
+
 type shutdownMsg struct{ err error }
 type tickMsg time.Time
 
 type Model struct {
-	ctx               context.Context
-	service           app.API
-	composer          textinput.Model
-	conversations     []domain.Conversation
-	messages          []domain.Message
-	cursor            int
-	screen            screen
-	width, height     int
-	status, errorText string
-	pollInterval      time.Duration
-	sending           bool
+	ctx             context.Context
+	cancel          context.CancelFunc
+	service         app.API
+	composer        textinput.Model
+	conversations   []domain.Conversation
+	messages        []domain.Message
+	cursor          int
+	screen          screen
+	width, height   int
+	status          string
+	connectionState string
+	deviceName      string
+	errorText       string
+	pollInterval    time.Duration
+	sending         bool
+	chatOffset      int
+	loadingOlder    bool
+	hasOlder        bool
+	eventMessages   <-chan domain.Message
+	eventErrors     <-chan error
+	eventDriven     bool
+	searchQuery     string
+	searchScreen    screen
 }
 
 func NewModel(ctx context.Context, service app.API, interval time.Duration) Model {
-	i := textinput.New()
-	i.Placeholder = "메시지 입력..."
-	i.Prompt = "> "
-	i.CharLimit = 4000
-	i.Focus()
+	modelContext, cancel := context.WithCancel(ctx)
+	composer := textinput.New()
+	composer.Placeholder = "메시지 입력..."
+	composer.Prompt = "› "
+	composer.CharLimit = 4000
+	composer.Focus()
 	if interval <= 0 {
 		interval = time.Second
 	}
-	return Model{ctx: ctx, service: service, composer: i, pollInterval: interval, status: "Loading…", width: 80, height: 24}
-}
-func (m Model) Init() tea.Cmd { return tea.Batch(m.loadConversations(), m.tick()) }
-func (m Model) loadConversations() tea.Cmd {
-	return func() tea.Msg { v, e := m.service.Conversations(m.ctx); return conversationsMsg{v, e} }
-}
-func (m Model) loadMessages(id int64) tea.Cmd {
-	return func() tea.Msg { v, e := m.service.Messages(m.ctx, id, domain.MessageQuery{}); return messagesMsg{v, e} }
-}
-func (m Model) tick() tea.Cmd {
-	return tea.Tick(m.pollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
-}
-func (m Model) poll() tea.Cmd {
-	focused := int64(0)
-	if m.screen == chatScreen && len(m.conversations) > 0 {
-		focused = m.conversations[m.cursor].ThreadID
+	model := Model{
+		ctx:          modelContext,
+		cancel:       cancel,
+		service:      service,
+		composer:     composer,
+		pollInterval: interval,
+		status:       "Loading…",
+		width:        80,
+		height:       24,
 	}
-	return func() tea.Msg { v, e := m.service.Poll(m.ctx, focused); return pollMsg{v, e} }
-}
-func (m Model) shutdown() tea.Cmd {
-	return func() tea.Msg { return shutdownMsg{m.service.Shutdown(context.Background())} }
+	model.resizeComposer()
+	return model
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch x := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = max(30, x.Width)
-		m.height = max(10, x.Height)
-	case conversationsMsg:
-		m.replaceConversations(x.items)
-		m.setError(x.err)
-		m.refreshStatus()
-	case messagesMsg:
-		m.messages = x.items
-		m.setError(x.err)
-		m.refreshStatus()
-		if x.err == nil {
-			m.screen = chatScreen
-			m.composer.Focus()
-		}
-	case sentMsg:
-		m.sending = false
-		m.setError(x.err)
-		m.refreshStatus()
-		if x.err == nil {
-			m.composer.SetValue("")
-			m.errorText = ""
-			return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))
-		}
-	case tickMsg:
-		return m, tea.Batch(m.poll(), m.tick())
-	case pollMsg:
-		m.setError(x.err)
-		m.refreshStatus()
-		if len(x.items) > 0 {
-			if m.screen == chatScreen {
-				return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))
-			}
-			return m, m.loadConversations()
-		}
-	case shutdownMsg:
-		m.setError(x.err)
-		return m, tea.Quit
-	case tea.KeyMsg:
-		if x.Type == tea.KeyCtrlC {
-			return m, m.shutdown()
-		}
-		if m.sending {
-			return m, nil
-		}
-		if x.Type == tea.KeyEsc && m.screen == chatScreen {
-			m.screen = conversationsScreen
-			m.composer.SetValue("")
-			m.errorText = ""
-			return m, nil
-		}
-		if m.screen == conversationsScreen {
-			return m.updateList(x)
-		}
-		if x.Type == tea.KeyEnter {
-			return m.submit()
-		}
-		var cmd tea.Cmd
-		m.composer, cmd = m.composer.Update(x)
-		return m, cmd
-	}
-	return m, nil
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.loadConversations(), m.connectEvents(), m.tick())
 }
-func (m Model) updateList(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch k.String() {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.conversations)-1 {
-			m.cursor++
-		}
-	case "enter":
-		if strings.HasPrefix(strings.TrimSpace(m.composer.Value()), "/") {
-			return m.submit()
-		}
-		if len(m.conversations) > 0 {
-			return m, m.loadMessages(m.selectedID())
-		}
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.composer, cmd = m.composer.Update(k)
-	return m, cmd
-}
-func (m Model) submit() (tea.Model, tea.Cmd) {
-	value := strings.TrimSpace(m.composer.Value())
-	if value == "" {
-		return m, nil
-	}
-	if strings.HasPrefix(value, "/") {
-		c, e := ParseCommand(value)
-		if e != nil {
-			m.errorText = e.Error()
-			return m, nil
-		}
-		switch c.Name {
-		case "exit", "quit":
-			return m, m.shutdown()
-		case "help":
-			m.errorText = "Enter send · Esc back · /exit /quit exit"
-			m.composer.SetValue("")
-			return m, nil
-		default:
-			m.errorText = "/" + c.Name + ": not implemented yet"
-			m.composer.SetValue("")
-			return m, nil
-		}
-	}
-	id := m.selectedID()
-	m.sending = true
-	m.status = "Sending…"
-	m.errorText = ""
-	return m, func() tea.Msg {
-		result, err := m.service.SendToConversation(m.ctx, id, value)
-		return sentMsg{result: result, err: err}
-	}
-}
+
 func (m Model) selectedID() int64 {
 	if m.cursor >= 0 && m.cursor < len(m.conversations) {
 		return m.conversations[m.cursor].ThreadID
@@ -237,17 +146,17 @@ func (m *Model) replaceConversations(items []domain.Conversation) {
 	m.cursor = min(m.cursor, len(items)-1)
 }
 
-func (m *Model) setError(e error) {
-	if e != nil {
-		if errors.Is(e, domain.ErrSendingNotImplemented) {
-			m.errorText = "Sending is not available yet."
-			return
-		}
-		if errors.Is(e, app.ErrGroupSendUnsupported) {
-			m.errorText = "Group conversation sending is not supported yet."
-			return
-		}
-		m.errorText = e.Error()
+func (m *Model) setError(err error) {
+	if err == nil {
+		return
+	}
+	switch {
+	case errors.Is(err, domain.ErrSendingNotImplemented):
+		m.errorText = "Sending is not available yet."
+	case errors.Is(err, app.ErrGroupSendUnsupported):
+		m.errorText = "Group conversation sending is not supported yet."
+	default:
+		m.errorText = err.Error()
 	}
 }
 
@@ -255,94 +164,31 @@ func (m *Model) refreshStatus() {
 	if m.sending {
 		return
 	}
-	if status := m.service.Status(m.ctx); status.Label != "" {
+	status := m.service.Status(m.ctx)
+	if status.Label != "" {
 		m.status = status.Label
 	}
+	if status.State != "" {
+		m.connectionState = status.State
+	}
+	if status.Device != "" {
+		m.deviceName = status.Device
+	}
 }
 
-var (
-	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
-	outgoingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-)
-
-func (m Model) View() string {
-	w := max(30, m.width)
-	header := headerStyle.Render("GalaxyTTY") + strings.Repeat(" ", max(1, w-25)) + "● " + m.status
-	bodyHeight := max(4, m.height-6)
-	leftW := max(14, min(28, w/3))
-	left := m.renderConversations(leftW, bodyHeight)
-	right := m.renderChat(max(14, w-leftW-3), bodyHeight)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " │ ", right)
-	footer := m.errorText
-	if m.screen == chatScreen {
-		footer = m.composer.View() + "\n" + footer
-	} else {
-		footer = m.composer.View() + "\n↑/↓ select · Enter open · slash commands\n" + footer
-	}
-	return lipgloss.NewStyle().Width(w).Render(header + "\n" + strings.Repeat("─", w) + "\n" + body + "\n" + strings.Repeat("─", w) + "\n" + footer)
-}
-func (m Model) renderConversations(w, h int) string {
-	lines := []string{"Conversations"}
-	visible := max(1, (h-1)/2)
-	start := max(0, m.cursor-visible/2)
-	end := min(len(m.conversations), start+visible)
-	start = max(0, end-visible)
-	for i := start; i < end; i++ {
-		c := m.conversations[i]
-		mark := "  "
-		if c.UnreadCount > 0 {
-			mark = "● "
-		}
-		name := truncate(c.Title, w-4)
-		if i == m.cursor {
-			name = selectedStyle.Render(name)
-		}
-		lines = append(lines, mark+name, "  "+truncate(c.Snippet, w-2))
-	}
-	return lipgloss.NewStyle().Width(w).Height(h).Render(strings.Join(lines, "\n"))
-}
-func (m Model) renderChat(w, h int) string {
-	if m.screen != chatScreen || len(m.conversations) == 0 {
-		return lipgloss.NewStyle().Width(w).Height(h).Render("Select a conversation")
-	}
-	lines := []string{headerStyle.Render(truncate(m.conversations[m.cursor].Title, w))}
-	visible := max(1, h-1)
-	start := max(0, len(m.messages)-visible)
-	for _, msg := range m.messages[start:] {
-		body := msg.Body
-		if len(msg.Attachments) > 0 {
-			body = "🖼 이미지"
-		}
-		body = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(body)
-		body = truncate(body, max(1, w-3))
-		if msg.Direction == domain.DirectionOutgoing {
-			body = outgoingStyle.Render("→ " + body)
-		} else {
-			body = "← " + body
-		}
-		lines = append(lines, body)
-	}
-	return lipgloss.NewStyle().Width(w).Height(h).Render(strings.Join(lines, "\n"))
-}
-func truncate(s string, w int) string {
-	r := []rune(s)
-	if w <= 0 {
-		return ""
-	}
-	if len(r) <= w {
-		return s
-	}
-	if w == 1 {
-		return "…"
-	}
-	return string(r[:w-1]) + "…"
-}
-
-// Run owns the Bubble Tea program; all business operations remain asynchronous tea.Cmd calls.
-func Run(ctx context.Context, in io.Reader, out io.Writer, service app.API, interval time.Duration) error {
-	_, err := tea.NewProgram(NewModel(ctx, service, interval), tea.WithAltScreen(), tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)).Run()
-	return err
-}
+func (m *Model) resizeComposer() { m.composer.Width = max(1, m.width-2) }
 
 func (m Model) Debug() string { return fmt.Sprintf("screen=%d selected=%d", m.screen, m.selectedID()) }
+
+// Run owns the Bubble Tea program; business operations remain asynchronous
+// commands below the application-service boundary.
+func Run(ctx context.Context, in io.Reader, out io.Writer, service app.API, interval time.Duration) error {
+	_, err := tea.NewProgram(
+		NewModel(ctx, service, interval),
+		tea.WithAltScreen(),
+		tea.WithContext(ctx),
+		tea.WithInput(in),
+		tea.WithOutput(out),
+	).Run()
+	return err
+}

@@ -5,8 +5,24 @@ import (
 	"errors"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/mock"
+	"strings"
 	"testing"
 )
+
+type conversationSender struct {
+	threadID int64
+	text     string
+}
+
+func (*conversationSender) Send(context.Context, string, string) (domain.SendResult, error) {
+	return domain.SendResult{}, errors.New("address send must not be used")
+}
+
+func (sender *conversationSender) SendToConversation(_ context.Context, threadID int64, text string) (domain.SendResult, error) {
+	sender.threadID = threadID
+	sender.text = text
+	return domain.SendResult{ThreadID: threadID}, nil
+}
 
 func serviceFixture(policy NotificationPolicy) (*Service, *mock.Backend, *mock.Notifier) {
 	b := mock.New()
@@ -43,6 +59,29 @@ func TestGroupSendUnsupported(t *testing.T) {
 	}
 	if len(b.Sent) != before {
 		t.Fatal("group rejection called sender")
+	}
+}
+
+func TestConversationAwareSenderDoesNotRequireMacPhoneParticipant(t *testing.T) {
+	_, backend, notifier := serviceFixture(NotificationPolicy{})
+	backend.ConversationsData[0].Participants = nil
+	sender := &conversationSender{}
+	service := NewService(
+		backend,
+		sender,
+		notifier,
+		nil,
+		NotificationPolicy{},
+		domain.ApplicationStatus{},
+	)
+
+	result, err := service.SendToConversation(context.Background(), 1, "reply through thread")
+	if err != nil || result.ThreadID != 1 || sender.threadID != 1 || sender.text != "reply through thread" {
+		t.Fatalf("result=%+v sender=%+v err=%v", result, sender, err)
+	}
+	if _, err := service.SendToConversation(context.Background(), 1, "   "); err == nil ||
+		!strings.Contains(err.Error(), "text is required") {
+		t.Fatalf("empty text err=%v", err)
 	}
 }
 func TestPollingAndNotificationPolicy(t *testing.T) {
@@ -96,5 +135,27 @@ func TestServiceUsesDynamicStatusProvider(t *testing.T) {
 	got := service.Status(context.Background())
 	if got.Label != "Offline" || got.State != "disconnected" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+type fixedEvents struct {
+	messages chan domain.Message
+	errors   chan error
+}
+
+func (events fixedEvents) SubscribeMessages(context.Context) (<-chan domain.Message, <-chan error) {
+	return events.messages, events.errors
+}
+
+func TestServiceExposesOptionalMessageEventSource(t *testing.T) {
+	service, _, _ := serviceFixture(NotificationPolicy{})
+	if messages, errorsChannel := service.SubscribeMessages(context.Background()); messages != nil || errorsChannel != nil {
+		t.Fatal("legacy service unexpectedly exposed events")
+	}
+	events := fixedEvents{messages: make(chan domain.Message, 1), errors: make(chan error, 1)}
+	service.WithMessageEvents(events)
+	messages, errorsChannel := service.SubscribeMessages(context.Background())
+	if messages == nil || errorsChannel == nil {
+		t.Fatal("event source was not exposed")
 	}
 }

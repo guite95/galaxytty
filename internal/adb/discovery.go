@@ -195,11 +195,11 @@ func (t *Target) Status(context.Context) domain.ApplicationStatus {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	if t.state != domain.DeviceConnected {
-		return domain.ApplicationStatus{State: string(t.state), Connection: t.info.Connection, Label: "Offline"}
+		return domain.ApplicationStatus{State: string(t.state), Connection: t.info.Connection, Label: "Offline", Device: t.info.Model}
 	}
 	label := "USB"
 	if t.info.Connection == domain.ConnectionWireless {
 		label = "Wireless"
 	}
-	return domain.ApplicationStatus{State: string(t.state), Connection: t.info.Connection, Label: label}
+	return domain.ApplicationStatus{State: string(t.state), Connection: t.info.Connection, Label: label, Device: t.info.Model}
 }

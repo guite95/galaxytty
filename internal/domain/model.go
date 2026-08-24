@@ -15,9 +15,10 @@ const (
 type MessageType string
 
 const (
-	MessageSMS MessageType = "sms"
-	MessageMMS MessageType = "mms"
-	MessageRCS MessageType = "rcs"
+	MessageUnknown MessageType = "unknown"
+	MessageSMS     MessageType = "sms"
+	MessageMMS     MessageType = "mms"
+	MessageRCS     MessageType = "rcs"
 )
 
 type Attachment struct {
@@ -28,10 +29,13 @@ type Message struct {
 	ID, ThreadID  int64
 	Address, Body string
 	Timestamp     time.Time
-	Direction     MessageDirection
-	Read          bool
-	Type          MessageType
-	Attachments   []Attachment
+	// ObservedAt is the source adapter's event observation time. It is kept
+	// separate from the message timestamp for latency diagnostics.
+	ObservedAt  time.Time
+	Direction   MessageDirection
+	Read        bool
+	Type        MessageType
+	Attachments []Attachment
 }
 type Conversation struct {
 	ThreadID     int64
@@ -100,6 +104,7 @@ type ApplicationStatus struct {
 	State      string
 	Connection ConnectionKind
 	Label      string
+	Device     string
 }
 type StatusProvider interface {
 	Status(context.Context) ApplicationStatus
@@ -115,6 +120,16 @@ type VirtualDisplayManager interface {
 }
 type MessageSender interface {
 	Send(context.Context, string, string) (SendResult, error)
+}
+
+// ConversationMessageSender is implemented by transports, such as a
+// notification RemoteInput reply, that address an existing conversation
+// without requiring a phone number on the Mac.
+type ConversationMessageSender interface {
+	SendToConversation(context.Context, int64, string) (SendResult, error)
+}
+type MessageEventSource interface {
+	SubscribeMessages(context.Context) (<-chan Message, <-chan error)
 }
 type ConversationController interface {
 	OpenConversation(context.Context, VirtualDisplay, string) error
