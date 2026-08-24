@@ -130,3 +130,10 @@ Notification Access and the foreground bridge. Automatic discovery, mutual
 authentication, encrypted conversation sync, and a bounded SMS message-page
 read succeeded. Device validation printed counts and structural types only;
 private content and identifiers were not logged or displayed.
+
+Helper `0.9.0-poc` adds a bounded 512-event in-memory replay journal. Every
+notification observation advances the sequence, including redacted events with
+no message content. Authenticated clients can request a missing range through
+`SYNC_REQUEST`; `SYNC_MESSAGE.complete` is true only when every sequence in the
+range is still present. A bounded message-store fallback may return useful
+records but never upgrades an incomplete replay to complete.

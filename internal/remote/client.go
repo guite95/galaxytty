@@ -43,6 +43,7 @@ type StateChange struct {
 type SequenceGap struct {
 	Expected uint64
 	Received uint64
+	Reset    bool
 }
 
 type Config struct {
@@ -276,6 +277,7 @@ func (client *Client) serve(ctx context.Context, conn net.Conn) error {
 	client.lastPong.Store(time.Now().UnixNano())
 	readErrors := make(chan error, 1)
 	go func() { readErrors <- client.readLoop(ctx, conn, secure) }()
+	client.trackHelloSequence(ctx, hello.EventSequence)
 	ticker := time.NewTicker(client.config.HeartbeatInterval)
 	defer ticker.Stop()
 
@@ -344,12 +346,36 @@ func (client *Client) trackSequence(ctx context.Context, received uint64) {
 	if received == 0 {
 		return
 	}
-	previous := client.lastSequence.Swap(received)
-	if previous == 0 || received <= previous+1 {
+	var previous uint64
+	for {
+		previous = client.lastSequence.Load()
+		if received <= previous {
+			return
+		}
+		if client.lastSequence.CompareAndSwap(previous, received) {
+			break
+		}
+	}
+	if previous == 0 || received == previous+1 {
 		return
 	}
 	select {
 	case client.gaps <- SequenceGap{Expected: previous + 1, Received: received}:
+	case <-ctx.Done():
+	}
+}
+
+func (client *Client) trackHelloSequence(ctx context.Context, current uint64) {
+	previous := client.lastSequence.Swap(current)
+	if previous == 0 || current == previous {
+		return
+	}
+	gap := SequenceGap{Expected: previous + 1, Received: current + 1}
+	if current < previous {
+		gap = SequenceGap{Expected: previous + 1, Received: current, Reset: true}
+	}
+	select {
+	case client.gaps <- gap:
 	case <-ctx.Done():
 	}
 }

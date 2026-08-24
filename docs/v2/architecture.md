@@ -99,6 +99,22 @@ IDs and SMS Provider thread IDs are not automatically merged because there is
 not yet reliable cross-source identity evidence; a duplicate conversation is
 preferable to joining unrelated conversations.
 
+## Sequence recovery boundary
+
+The Helper retains the most recent 512 event sequence records in memory. A
+record exists even when a notification event contains only redacted shape
+metadata, which lets the Helper prove whether an entire missing range is
+available. `SYNC_REQUEST` and its correlated `SYNC_MESSAGE` run only inside the
+authenticated encrypted session.
+
+The Mac requests gaps immediately, including ranges learned from HELLO after a
+reconnect, and suppresses duplicate recovered message IDs. If the bounded
+journal has evicted part of the range, the Helper may include message-store
+fallback records but returns `complete=false`; the TUI then performs its normal
+conversation/history refresh. A sequence epoch moving backward means the
+Helper process restarted and also triggers a full refresh rather than a false
+replay-success claim.
+
 The HMAC challenge performs mutual credential confirmation. All subsequent
 protocol envelopes use directional HKDF-SHA256 session keys and AES-256-GCM
 frames with monotonic counters. Notification content parsing, bounded

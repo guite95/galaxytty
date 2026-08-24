@@ -99,6 +99,11 @@ confirmation, inside AES-256-GCM `SECURE` frames using directional HKDF-derived
 keys and monotonic replay-protected counters. Notification transport remains
 `unknown` until the Helper has evidence for SMS, MMS, or RCS.
 
+The Helper also retains a bounded 512-event in-memory sequence journal. The Mac
+requests only a missing sequence range after a live gap or reconnect, suppresses
+duplicate recovered messages, and falls back to a full encrypted read refresh
+when the Helper process has restarted or the journal cannot prove completeness.
+
 The application layer can now route an existing notification conversation by
 opaque `threadId` through `SEND_REPLY`; the Mac does not need a phone number and
 still does not know Samsung-specific details. The Helper retains the matching

@@ -120,6 +120,7 @@ type HelloPayload struct {
 	DeviceID      string         `json:"deviceId"`
 	DeviceName    string         `json:"deviceName"`
 	Capabilities  []string       `json:"capabilities"`
+	EventSequence uint64         `json:"eventSequence,omitempty"`
 	Authenticated bool           `json:"authenticated"`
 	ReadOnlyPOC   bool           `json:"readOnlyPoc"`
 	Auth          *AuthChallenge `json:"auth,omitempty"`

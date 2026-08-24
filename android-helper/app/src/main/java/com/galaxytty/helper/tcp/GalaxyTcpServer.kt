@@ -3,6 +3,7 @@ package com.galaxytty.helper.tcp
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.galaxytty.helper.message.EventReplayJournal
 import com.galaxytty.helper.message.LiveMessageQuery
 import com.galaxytty.helper.message.MessageRepository
 import com.galaxytty.helper.message.StoredMessage
@@ -57,6 +58,7 @@ class GalaxyTcpServer(
         }
     }
     private val sequence = AtomicLong(0)
+    private val replayJournal = EventReplayJournal()
     private var serverSocket: ServerSocket? = null
     private var activeSession: ClientSession? = null
 
@@ -86,6 +88,11 @@ class GalaxyTcpServer(
                 )
             }
         }
+        val storedMessage = observation.message
+            ?.takeIf { contentIncluded }
+            ?.toStoredMessage()
+        val eventSequence = sequence.incrementAndGet()
+        replayJournal.append(eventSequence, storedMessage)
         val payload = JSONObject()
             .put("notificationKey", observation.keyFingerprint)
             .put("postedAt", observation.postedAtMillis)
@@ -93,14 +100,10 @@ class GalaxyTcpServer(
             .put("actionCount", observation.actionCount)
             .put("replyCandidates", replyShapes)
             .put("contentIncluded", contentIncluded)
-        if (contentIncluded) {
-            observation.message?.let { message ->
-                payload.put("message", messageJson(message.toStoredMessage()))
-            }
-        }
+        storedMessage?.let { message -> payload.put("message", messageJson(message)) }
         val envelope = ProtocolEnvelope.create(
             type = ProtocolTypes.MESSAGE_RECEIVED,
-            sequence = sequence.incrementAndGet(),
+            sequence = eventSequence,
             payload = payload,
         )
         try {
@@ -178,6 +181,7 @@ class GalaxyTcpServer(
                     payload = JSONObject()
                         .put("deviceId", deviceId)
                         .put("deviceName", Build.MODEL)
+                        .put("eventSequence", sequence.get())
                         .put(
                             "capabilities",
                             JSONArray(
@@ -185,6 +189,7 @@ class GalaxyTcpServer(
                                     "ping",
                                     "notification-content",
                                     "live-memory-history",
+                                    "sequence-recovery",
                                     if (smsHistoryAvailable()) {
                                         "sms-history"
                                     } else {
@@ -317,6 +322,49 @@ class GalaxyTcpServer(
                                 ),
                             )
                         }
+                        ProtocolTypes.SYNC_REQUEST -> {
+                            val fromSequence = request.payload.optLong("fromSequence", 0)
+                            val throughSequence = request.payload.optLong("throughSequence", 0)
+                            val afterMessageId = request.payload.optLong("afterMessageId", 0)
+                            val limit = request.payload.optInt("limit", LiveMessageQuery.MAX_LIMIT)
+                                .coerceIn(1, LiveMessageQuery.MAX_LIMIT)
+                            if (fromSequence <= 0 || throughSequence < fromSequence || afterMessageId < 0) {
+                                sendError(
+                                    request.requestId,
+                                    "INVALID_SYNC_REQUEST",
+                                    "Sequence recovery range is invalid",
+                                )
+                            } else {
+                                val replay = replayJournal.recover(fromSequence, throughSequence)
+                                val recovered = if (replay.complete) {
+                                    replay.messages
+                                } else {
+                                    (replay.messages + messageStore.messages(
+                                        LiveMessageQuery(
+                                            limit = limit,
+                                            afterId = afterMessageId,
+                                        ),
+                                    )).distinctBy(StoredMessage::id)
+                                        .sortedWith(compareBy(StoredMessage::postedAtMillis, StoredMessage::id))
+                                        .takeLast(limit)
+                                }
+                                send(
+                                    ProtocolEnvelope.create(
+                                        type = ProtocolTypes.SYNC_MESSAGE,
+                                        requestId = request.requestId,
+                                        payload = JSONObject()
+                                            .put("fromSequence", fromSequence)
+                                            .put("throughSequence", throughSequence)
+                                            .put("complete", replay.complete)
+                                            .put(
+                                                "source",
+                                                if (replay.complete) "event_replay" else "message_store_fallback",
+                                            )
+                                            .put("items", messagesJson(recovered)),
+                                    ),
+                                )
+                            }
+                        }
                         ProtocolTypes.SEND_REPLY -> {
                             val threadId = request.payload.optLong("threadId", 0)
                             val result = replyActions.dispatch(
@@ -415,4 +463,7 @@ class GalaxyTcpServer(
             .put("read", message.read)
             .put("messageType", message.messageType)
             .put("attachments", JSONArray())
+
+    private fun messagesJson(messages: List<StoredMessage>): JSONArray =
+        JSONArray().apply { messages.forEach { message -> put(messageJson(message)) } }
 }

@@ -188,3 +188,19 @@ send has been authorized for this work.
   page mapped entirely to SMS with a valid direction. Validation output
   contained counts only—no SMS body, participant, title, phone number, or
   identifier. No notification action or message send was executed.
+- Helper `0.9.0-poc` implements bounded event recovery. A 512-record in-memory
+  journal retains every notification sequence and optional message, while
+  authenticated `SYNC_REQUEST` returns a correlated range response. The Mac
+  now recovers a forward gap, requests offline ranges immediately from HELLO
+  after reconnect, suppresses duplicate message IDs, and treats journal
+  eviction or a Helper sequence-epoch reset as incomplete so the TUI performs
+  a full read refresh. Hardware-independent Go race tests and Android journal
+  tests cover complete, contentless, evicted, duplicate, reconnect, and reset
+  behavior.
+- Helper `0.9.0-poc` was update-installed on the reference Galaxy without
+  clearing app data. Notification Access, `READ_SMS`, the foreground bridge,
+  DNS-SD discovery, and encrypted authentication remained ready. A gated,
+  read-only integration test sent `SYNC_REQUEST` for sequence 1 with a fallback
+  cursor beyond real message IDs; the fresh empty journal correctly returned
+  `complete=false` with zero items. No private fields were logged, and no
+  notification action or message send was executed.

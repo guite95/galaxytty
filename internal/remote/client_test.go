@@ -278,6 +278,50 @@ func TestClientHeartbeatRequestCorrelationAndSequenceGap(t *testing.T) {
 	}
 }
 
+func TestClientUsesReconnectHelloSequenceForImmediateRecovery(t *testing.T) {
+	client := newClient(Config{}, nil)
+	client.lastSequence.Store(4)
+	client.trackHelloSequence(context.Background(), 7)
+
+	select {
+	case gap := <-client.SequenceGaps():
+		if gap != (SequenceGap{Expected: 5, Received: 8}) {
+			t.Fatalf("gap=%+v", gap)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing reconnect gap")
+	}
+	if current := client.lastSequence.Load(); current != 7 {
+		t.Fatalf("sequence=%d", current)
+	}
+
+	client.trackHelloSequence(context.Background(), 2)
+	select {
+	case gap := <-client.SequenceGaps():
+		if gap != (SequenceGap{Expected: 8, Received: 2, Reset: true}) {
+			t.Fatalf("reset gap=%+v", gap)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing sequence reset")
+	}
+}
+
+func TestClientIgnoresDuplicateOrOutOfOrderEventSequence(t *testing.T) {
+	client := newClient(Config{}, nil)
+	client.lastSequence.Store(8)
+	client.trackSequence(context.Background(), 8)
+	client.trackSequence(context.Background(), 7)
+
+	if current := client.lastSequence.Load(); current != 8 {
+		t.Fatalf("sequence regressed to %d", current)
+	}
+	select {
+	case gap := <-client.SequenceGaps():
+		t.Fatalf("unexpected gap=%+v", gap)
+	default:
+	}
+}
+
 func TestClientReconnectsAfterDisconnect(t *testing.T) {
 	connections := make(chan net.Conn, 2)
 	clientSide := make(chan net.Conn, 2)

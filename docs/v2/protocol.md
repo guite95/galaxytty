@@ -43,6 +43,12 @@ mutual key confirmation rather than trusting a bare `authenticated: true`
 value. Failed or missing authentication closes the session, and an
 unauthenticated session is never installed as the live notification consumer.
 
+`HELLO.payload.eventSequence` reports the latest Helper event sequence. On an
+initial connection it establishes the Mac baseline. On reconnect, a higher
+value immediately identifies the missing range even if no new notification
+arrives afterward. A lower value indicates a Helper process/sequence epoch
+restart and requires a full read refresh.
+
 After `AUTH`, both peers use HKDF-SHA256 with the shared credential and the
 32-byte session challenge to derive separate client-to-server and
 server-to-client AES-256 keys plus four-byte nonce prefixes. Each inner protocol
@@ -104,6 +110,30 @@ native IDs, addresses, direction, read state, and `messageType: "sms"`. The
 Helper advertises either `sms-history` or
 `sms-history-permission-required` in `HELLO`. Notification and Provider thread
 IDs are not guessed to be equivalent.
+
+For a detected gap where sequence 10 and 11 are missing before sequence 12, the
+Mac sends the following only inside the secure session:
+
+```json
+{
+  "version": 1,
+  "type": "SYNC_REQUEST",
+  "requestId": "correlation-id",
+  "payload": {
+    "fromSequence": 10,
+    "throughSequence": 11,
+    "afterMessageId": 1845493760000000001,
+    "limit": 500
+  }
+}
+```
+
+The Helper responds once with correlated `SYNC_MESSAGE` containing `items`,
+the echoed range, a non-sensitive `source`, and `complete`. `complete: true`
+means every event sequence in the requested range was retained, including
+contentless events. If the 512-event journal cannot prove that, the response is
+`complete: false`; message-store fallback items may still be included, and the
+Mac requests a normal full read refresh instead of assuming recovery succeeded.
 
 `SEND_MESSAGE` and unimplemented send fallbacks
 still receive `ERROR` with `POC_READ_ONLY`. No unauthenticated peer can invoke
