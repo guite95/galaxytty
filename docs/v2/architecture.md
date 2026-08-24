@@ -68,9 +68,11 @@ path.
 The Helper owns every Samsung-specific object. It retains a bounded mapping from
 thread ID to an active free-form RemoteInput action and removes it with the
 notification. The production registry is constructed with a hard-disabled
-execution policy. Tests may inject an enabled policy only with fake actions.
-Even after a future authorized action execution, PendingIntent acceptance is
-`accepted_unverified` until independent outgoing evidence exists.
+execution policy for release builds. Debug builds may consume one private-file
+marker that expires after 60 seconds and is deleted before the action runs.
+The Mac test also requires explicit environment gates and an authenticated
+capability preflight. PendingIntent acceptance is `accepted_unverified` until
+independent outgoing evidence exists.
 
 No default test command may send a real message. Any RemoteInput, `ACTION_SENDTO`,
 or Accessibility send test requires all of the following explicit gates:
@@ -79,6 +81,8 @@ or Accessibility send test requires all of the following explicit gates:
 GALAXYTTY_REAL_DEVICE_TEST=1
 GALAXYTTY_ENABLE_SEND_TEST=1
 GALAXYTTY_TEST_RECIPIENT=...
+GALAXYTTY_TEST_TEXT=...
+GALAXYTTY_ALLOW_SOLE_ACTIVE_REPLY=1  # only when the label is not exported verbatim
 ```
 
 Send success must describe the evidence actually observed. In particular, an

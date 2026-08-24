@@ -6,7 +6,7 @@ import android.util.Log
 import com.galaxytty.helper.tcp.BridgeRuntime
 
 class GalaxyNotificationListenerService : NotificationListenerService() {
-    private val adapter = SamsungMessagesAdapter()
+    private val adapter by lazy { SamsungMessagesAdapter(applicationContext) }
 
     override fun onListenerConnected() {
         super.onListenerConnected()

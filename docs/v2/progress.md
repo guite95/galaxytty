@@ -26,8 +26,8 @@ send has been authorized for this work.
 - Lazy history paging, stable scroll anchors, stale-result protection, and
   cancellation of active UI work during shutdown.
 - Native Kotlin Helper project with a redacted Samsung Messages notification
-  observer and RemoteInput shape analysis. The production reply execution gate
-  remains hard-disabled.
+  observer and RemoteInput shape analysis. Release reply execution remains
+  disabled; debuggable builds require an expiring private one-shot test gate.
 - Versioned length-prefixed JSON codecs, heartbeat, request correlation,
   sequence-gap reporting, reconnect, DNS-SD discovery, and remote Go adapters.
 - The Mac reports a connection only after a valid Helper `HELLO`, and shutdown
@@ -217,3 +217,26 @@ send has been authorized for this work.
   were ready, and a fresh automatic DNS-SD discovery plus encrypted doctor
   heartbeat succeeded. Wi-Fi was not toggled, no notification action ran, and
   no message was sent.
+- Helper `0.10.1-poc` adds an authenticated, content-free reply-capability query
+  plus a debug-only 60-second one-shot execution marker. The real-device script
+  requires explicit device, send, recipient, and text gates, disables Go test
+  caching, and consumes the marker before execution. A non-verbatim Samsung
+  label also requires a separate sole-active gate and exactly one available
+  RemoteInput target. Cleanup runs on every exit; release builds remain disabled.
+- With explicit user approval for the sole current Samsung notification and its
+  exact test text, the first action attempt exposed a missing caller `Context`
+  and was rejected before PendingIntent acceptance. After correcting the
+  Android API contract and update-installing `0.10.1-poc`, Samsung accepted the
+  one-shot RemoteInput action. The gate was confirmed closed afterward.
+- The accepted action is still `accepted_unverified`. A read-only search found
+  zero exact outgoing SMS Provider rows in the execution window, so GalaxyTTY
+  does not claim SMS, RCS, or delivery success. A redacted notification update
+  followed the action, but notification behavior is not outgoing evidence.
+- The user subsequently confirmed that the authorized reply appeared as
+  successfully sent through Samsung Messages. This is the first human-confirmed
+  real-device RemoteInput send for the Helper path. It does not change the
+  protocol result to `verified`, because the Helper still lacks independent
+  machine-readable outgoing evidence and cannot classify the transport.
+- A post-action read-only preflight found zero active RemoteInput targets. The
+  script therefore refuses to arm another execution in the current state,
+  preventing an accidental repeat of the authorized text.

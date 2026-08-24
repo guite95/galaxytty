@@ -66,6 +66,8 @@ object ProtocolTypes {
     const val GET_MESSAGES = "GET_MESSAGES"
     const val MESSAGES = "MESSAGES"
     const val SEND_MESSAGE = "SEND_MESSAGE"
+    const val GET_REPLY_CAPABILITY = "GET_REPLY_CAPABILITY"
+    const val REPLY_CAPABILITY = "REPLY_CAPABILITY"
     const val SEND_REPLY = "SEND_REPLY"
     const val SEND_RESULT = "SEND_RESULT"
     const val SYNC_REQUEST = "SYNC_REQUEST"
@@ -84,6 +86,8 @@ object ProtocolTypes {
         GET_MESSAGES,
         MESSAGES,
         SEND_MESSAGE,
+        GET_REPLY_CAPABILITY,
+        REPLY_CAPABILITY,
         SEND_REPLY,
         SEND_RESULT,
         SYNC_REQUEST,

@@ -1,6 +1,7 @@
 package com.galaxytty.helper.tcp
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.util.Log
 import com.galaxytty.helper.message.CompositeMessageStore
 import com.galaxytty.helper.message.LiveMessageStore
@@ -8,14 +9,27 @@ import com.galaxytty.helper.message.SmsRepository
 import com.galaxytty.helper.notification.NotificationObservation
 import com.galaxytty.helper.samsung.ReplyAction
 import com.galaxytty.helper.samsung.ReplyActionRegistry
+import com.galaxytty.helper.samsung.ReplyExecutionPolicy
+import com.galaxytty.helper.samsung.OneShotReplyExecutionPolicy
+import java.io.File
 
 object BridgeRuntime {
     private val messages = LiveMessageStore()
-    private val replies = ReplyActionRegistry()
+    @Volatile
+    private var replyExecution: OneShotReplyExecutionPolicy? = null
+    private val replies = ReplyActionRegistry(
+        policy = ReplyExecutionPolicy { replyExecution?.allowsExecution() == true },
+    )
     private var server: GalaxyTcpServer? = null
 
     @Synchronized
     fun start(context: Context): Int {
+        if (replyExecution == null) {
+            replyExecution = OneShotReplyExecutionPolicy(
+                markerFile = File(context.applicationContext.filesDir, OneShotReplyExecutionPolicy.MARKER_FILE_NAME),
+                enabled = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
+            )
+        }
         val running = server ?: run {
             val smsHistory = SmsRepository(context.applicationContext)
             val combined = CompositeMessageStore(messages, smsHistory) { error ->
@@ -33,6 +47,8 @@ object BridgeRuntime {
 
     @Synchronized
     fun port(): Int? = server?.port()
+
+    fun replyTestArmed(): Boolean = replyExecution?.isArmed() == true
 
     fun publish(observation: NotificationObservation) {
         val contentIncluded = observation.message?.let(messages::add) == true
@@ -55,6 +71,8 @@ object BridgeRuntime {
     fun stop() {
         server?.close()
         server = null
+        replyExecution?.clear()
+        replyExecution = null
     }
 
     private const val TAG = "GalaxyTTY"

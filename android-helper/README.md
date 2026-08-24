@@ -137,3 +137,22 @@ no message content. Authenticated clients can request a missing range through
 `SYNC_REQUEST`; `SYNC_MESSAGE.complete` is true only when every sequence in the
 range is still present. A bounded message-store fallback may return useful
 records but never upgrades an incomplete replay to complete.
+
+Helper `0.10.1-poc` adds the separately gated real RemoteInput test path.
+Release APKs remain unable to execute replies. A debug APK requires a private
+one-shot file created through an authorized ADB test, consumes it before
+`PendingIntent.send()`, and rejects it after 60 seconds. The Mac-side test also
+requires device, send, recipient, and text environment gates, disables Go test
+caching, and never prints private message data. If Samsung does not export the
+authorized label verbatim, a separate sole-active confirmation gate is required
+and succeeds only when exactly one reply-capable notification thread exists.
+
+The first authorized device attempt exposed a caller-context bug and was
+rejected before PendingIntent acceptance. After passing the NotificationListener
+application context as required for a non-null fill-in Intent, Samsung accepted
+the one-shot RemoteInput action. The result remains `accepted_unverified`:
+there was no exact outgoing SMS Provider row, and the Helper does not infer RCS
+delivery from notification behavior. The user then confirmed that Samsung
+Messages showed the authorized reply as successfully sent. That is valid
+real-device PoC evidence, but the runtime still cannot automatically promote a
+future accepted action to `verified` without independent outgoing evidence.

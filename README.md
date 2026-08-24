@@ -91,8 +91,9 @@ authenticated PoC is intentionally **non-sending by default**. It extracts the l
 incoming `MessagingStyle` text from Samsung Messages notifications, keeps a
 bounded in-memory-only conversation cache, and exposes read sync plus live
 `MESSAGE_RECEIVED` events. A correlated `SEND_REPLY` request reaches a
-hard-disabled execution policy and cannot invoke the retained notification
-action. With user-granted `READ_SMS`, bounded SMS conversations/history are
+default-disabled execution policy. Only a debuggable APK with a fresh private
+one-shot marker can invoke the retained notification action. With user-granted
+`READ_SMS`, bounded SMS conversations/history are
 queried by the Helper's `ContentResolver`; the Mac no longer reads that
 Provider for the v2 path. Message content is available only after mutual HMAC key
 confirmation, inside AES-256-GCM `SECURE` frames using directional HKDF-derived
@@ -114,10 +115,32 @@ rediscovery loop.
 The application layer can now route an existing notification conversation by
 opaque `threadId` through `SEND_REPLY`; the Mac does not need a phone number and
 still does not know Samsung-specific details. The Helper retains the matching
-free-form RemoteInput action only in memory. Production wiring uses a hard
-disabled execution policy, so `PendingIntent.send()` cannot run yet. When that
-gate is explicitly enabled in a later authorized device test, RemoteInput
-acceptance will produce `accepted_unverified`, never a verified-send result.
+free-form RemoteInput action only in memory. Release builds remain disabled.
+The gated debug test first proves that exactly one active reply action matches
+the user-authorized current notification, then creates a private one-shot token
+that expires after 60 seconds. RemoteInput acceptance produces
+`accepted_unverified`, never a verified-send result.
+
+The real Helper reply test can deliver a message and must never be run without
+explicit permission for the recipient and text:
+
+```sh
+GALAXYTTY_REAL_DEVICE_TEST=1 \
+GALAXYTTY_ENABLE_SEND_TEST=1 \
+GALAXYTTY_TEST_RECIPIENT='authorized-current-notification' \
+GALAXYTTY_TEST_TEXT='authorized-test-text' \
+GALAXYTTY_ALLOW_SOLE_ACTIVE_REPLY=1 \
+./scripts/test-helper-send.sh
+```
+
+The script disables Go test caching, performs a read-only target/capability
+preflight, arms exactly one debug execution, removes any leftover marker, and
+checks for exact outgoing SMS Provider evidence without printing private data.
+`GALAXYTTY_ALLOW_SOLE_ACTIVE_REPLY=1` is needed only when Samsung does not
+export the user-visible target label verbatim; it allows selection only when
+exactly one active reply-capable notification exists.
+No Provider match means the result remains unverified; it is not evidence of
+RCS delivery.
 
 When one physical Galaxy appears through USB and Wireless ADB, GalaxyTTY groups
 the endpoints by hardware serial and selects USB by default. Select an exact

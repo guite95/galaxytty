@@ -34,8 +34,12 @@ class ReplyActionRegistryTest {
     fun validatesRequestsAndRemovesExpiredNotificationActions() {
         val registry = ReplyActionRegistry(policy = ReplyExecutionPolicy { true })
         registry.register("opaque-notification", 7) {}
+
+        assertTrue(registry.available(7))
         assertEquals(ReplyDispatchStatus.INVALID_REQUEST, registry.dispatch(7, " ").status)
         registry.unregister("opaque-notification")
+
+        assertFalse(registry.available(7))
         assertEquals(ReplyDispatchStatus.ACTION_UNAVAILABLE, registry.dispatch(7, "reply").status)
     }
 
@@ -50,5 +54,19 @@ class ReplyActionRegistryTest {
         assertEquals(ReplyDispatchStatus.ACTION_UNAVAILABLE, registry.dispatch(1, "reply").status)
         assertEquals(ReplyDispatchStatus.ACCEPTED_UNVERIFIED, registry.dispatch(3, "reply").status)
         assertTrue(invoked == listOf(3L))
+    }
+
+    @Test
+    fun failureReportsOnlyExceptionClass() {
+        val registry = ReplyActionRegistry(policy = ReplyExecutionPolicy { true })
+        registry.register("opaque-notification", 7) {
+            throw IllegalStateException("private implementation detail")
+        }
+
+        val result = registry.dispatch(7, "reply")
+
+        assertEquals(ReplyDispatchStatus.FAILED, result.status)
+        assertTrue(result.error?.contains("IllegalStateException") == true)
+        assertFalse(result.error?.contains("private implementation detail") == true)
     }
 }

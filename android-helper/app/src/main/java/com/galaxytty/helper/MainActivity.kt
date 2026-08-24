@@ -148,7 +148,8 @@ class MainActivity : Activity() {
                 appendLine("Pairing code: hidden")
             }
             appendLine("Samsung notifications observed: ${observations.size}")
-            appendLine("Real reply execution: disabled in this PoC")
+            appendLine("Real reply execution: disabled by default")
+            appendLine("Debug one-shot reply: ${if (BridgeRuntime.replyTestArmed()) "armed" else "not armed"}")
             appendLine("Local TCP port: ${BridgeRuntime.port() ?: "stopped"}")
             appendLine("TCP commands enabled: authenticated read sync and encrypted events")
             observations.takeLast(10).forEachIndexed { index, observation ->

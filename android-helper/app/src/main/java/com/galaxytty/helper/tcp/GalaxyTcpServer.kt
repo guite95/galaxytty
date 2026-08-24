@@ -365,6 +365,17 @@ class GalaxyTcpServer(
                                 )
                             }
                         }
+                        ProtocolTypes.GET_REPLY_CAPABILITY -> {
+                            val threadId = request.payload.optLong("threadId", 0)
+                            send(
+                                ProtocolEnvelope.create(
+                                    type = ProtocolTypes.REPLY_CAPABILITY,
+                                    requestId = request.requestId,
+                                    payload = JSONObject()
+                                        .put("available", replyActions.available(threadId)),
+                                ),
+                            )
+                        }
                         ProtocolTypes.SEND_REPLY -> {
                             val threadId = request.payload.optLong("threadId", 0)
                             val result = replyActions.dispatch(

@@ -1,6 +1,7 @@
 package com.galaxytty.helper.notification
 
 import android.app.Notification
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.service.notification.StatusBarNotification
@@ -9,6 +10,7 @@ import com.galaxytty.helper.samsung.ReplyAction
 import com.galaxytty.helper.security.PairingCredential
 
 class SamsungMessagesAdapter(
+    private val context: Context,
     private val analyzer: NotificationAnalyzer = NotificationAnalyzer(),
     private val contentParser: NotificationContentParser = NotificationContentParser(PairingCredential::secret),
 ) {
@@ -36,7 +38,7 @@ class SamsungMessagesAdapter(
                 } else {
                     0
                 }
-                replyPriority to AndroidRemoteInputReplyAction(pendingIntent, inputs.toTypedArray())
+                replyPriority to AndroidRemoteInputReplyAction(context, pendingIntent, inputs.toTypedArray())
             }
             ?.maxByOrNull { (priority, _) -> priority }
             ?.second

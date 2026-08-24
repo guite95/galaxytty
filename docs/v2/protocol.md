@@ -137,8 +137,14 @@ Mac requests a normal full read refresh instead of assuming recovery succeeded.
 
 `SEND_MESSAGE` and unimplemented send fallbacks
 still receive `ERROR` with `POC_READ_ONLY`. No unauthenticated peer can invoke
-read commands or receive message content, and the production reply execution
-gate prevents every peer from invoking a PendingIntent through this PoC.
+read commands or receive message content. Release builds cannot invoke a reply
+PendingIntent. A debuggable APK requires a fresh private one-shot marker in
+addition to authenticated protocol access.
+
+`GET_REPLY_CAPABILITY` accepts only an opaque `threadId` and returns a correlated
+`REPLY_CAPABILITY` containing `available: true|false`. It reveals no title,
+number, body, action key, or execution-gate state and does not consume the
+one-shot marker.
 
 `SEND_REPLY` addresses the active notification conversation rather than a
 transport or recipient:
@@ -155,9 +161,8 @@ transport or recipient:
 }
 ```
 
-The implemented production policy currently returns a correlated `SEND_RESULT`
-with `outcome: "failed"` before invoking any PendingIntent. Tests can inject an
-enabled policy with a fake reply action; a successful fake dispatch maps to
+The default policy returns a correlated `SEND_RESULT` with `outcome: "failed"`
+before invoking any PendingIntent. An explicitly armed debug action maps to
 `accepted_unverified` with `remote_input_pending_intent_accepted` evidence.
 `accepted_unverified` is intentionally surfaced as an error by the Mac adapter,
 so the composer is not cleared and success is not claimed.

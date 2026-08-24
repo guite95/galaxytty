@@ -12,22 +12,24 @@ const CurrentVersion = 1
 type Type string
 
 const (
-	TypeHello            Type = "HELLO"
-	TypeAuth             Type = "AUTH"
-	TypeSecure           Type = "SECURE"
-	TypePing             Type = "PING"
-	TypePong             Type = "PONG"
-	TypeMessageReceived  Type = "MESSAGE_RECEIVED"
-	TypeGetConversations Type = "GET_CONVERSATIONS"
-	TypeConversations    Type = "CONVERSATIONS"
-	TypeGetMessages      Type = "GET_MESSAGES"
-	TypeMessages         Type = "MESSAGES"
-	TypeSendMessage      Type = "SEND_MESSAGE"
-	TypeSendReply        Type = "SEND_REPLY"
-	TypeSendResult       Type = "SEND_RESULT"
-	TypeSyncRequest      Type = "SYNC_REQUEST"
-	TypeSyncMessage      Type = "SYNC_MESSAGE"
-	TypeError            Type = "ERROR"
+	TypeHello              Type = "HELLO"
+	TypeAuth               Type = "AUTH"
+	TypeSecure             Type = "SECURE"
+	TypePing               Type = "PING"
+	TypePong               Type = "PONG"
+	TypeMessageReceived    Type = "MESSAGE_RECEIVED"
+	TypeGetConversations   Type = "GET_CONVERSATIONS"
+	TypeConversations      Type = "CONVERSATIONS"
+	TypeGetMessages        Type = "GET_MESSAGES"
+	TypeMessages           Type = "MESSAGES"
+	TypeSendMessage        Type = "SEND_MESSAGE"
+	TypeGetReplyCapability Type = "GET_REPLY_CAPABILITY"
+	TypeReplyCapability    Type = "REPLY_CAPABILITY"
+	TypeSendReply          Type = "SEND_REPLY"
+	TypeSendResult         Type = "SEND_RESULT"
+	TypeSyncRequest        Type = "SYNC_REQUEST"
+	TypeSyncMessage        Type = "SYNC_MESSAGE"
+	TypeError              Type = "ERROR"
 )
 
 var knownTypes = []Type{
@@ -42,6 +44,8 @@ var knownTypes = []Type{
 	TypeGetMessages,
 	TypeMessages,
 	TypeSendMessage,
+	TypeGetReplyCapability,
+	TypeReplyCapability,
 	TypeSendReply,
 	TypeSendResult,
 	TypeSyncRequest,

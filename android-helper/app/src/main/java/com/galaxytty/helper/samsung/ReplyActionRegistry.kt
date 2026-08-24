@@ -55,6 +55,9 @@ class ReplyActionRegistry(
     }
 
     @Synchronized
+    fun available(threadId: Long): Boolean = threadId > 0 && actions.containsKey(threadId)
+
+    @Synchronized
     fun dispatch(threadId: Long, text: String): ReplyDispatchResult {
         if (threadId <= 0 || text.isBlank() || text.length > MAX_TEXT_LENGTH) {
             return ReplyDispatchResult(ReplyDispatchStatus.INVALID_REQUEST, "A valid thread and message text are required")
@@ -73,8 +76,11 @@ class ReplyActionRegistry(
         return try {
             registered.action.send(text)
             ReplyDispatchResult(ReplyDispatchStatus.ACCEPTED_UNVERIFIED)
-        } catch (_: Exception) {
-            ReplyDispatchResult(ReplyDispatchStatus.FAILED, "Samsung Messages rejected the RemoteInput action")
+        } catch (error: Exception) {
+            ReplyDispatchResult(
+                ReplyDispatchStatus.FAILED,
+                "Samsung Messages rejected the RemoteInput action (${error.javaClass.simpleName})",
+            )
         }
     }
 
