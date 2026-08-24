@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/pairing"
 	"github.com/galaxytty/galaxytty/internal/protocol"
 )
@@ -366,6 +367,154 @@ func TestClientReconnectsAfterDisconnect(t *testing.T) {
 	}
 }
 
+func TestClientRediscoversAddressAndPublishesReconnectStatus(t *testing.T) {
+	firstClient, firstServer := net.Pipe()
+	secondClient, secondServer := net.Pipe()
+	defer firstServer.Close()
+	defer secondServer.Close()
+
+	clientConnections := map[string]net.Conn{
+		"192.0.2.10:41000": firstClient,
+		"192.0.2.11:42000": secondClient,
+	}
+	dialed := make(chan string, 2)
+	client := newClient(Config{
+		HeartbeatInterval: time.Hour,
+		PongTimeout:       2 * time.Hour,
+		ReconnectMinimum:  time.Millisecond,
+		ReconnectMaximum:  time.Millisecond,
+	}, func(_ context.Context, _, address string) (net.Conn, error) {
+		dialed <- address
+		return clientConnections[address], nil
+	})
+	resolved := make(chan string, 2)
+	client.address = func(ctx context.Context) (string, error) {
+		select {
+		case address := <-resolved:
+			return address, nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	statuses := client.SubscribeStatus(ctx)
+	runDone := make(chan error, 1)
+	go func() { runDone <- client.Run(ctx) }()
+
+	resolved <- "192.0.2.10:41000"
+	if address := <-dialed; address != "192.0.2.10:41000" {
+		t.Fatalf("first dial address=%q", address)
+	}
+	writeHello(t, firstServer, "Galaxy test")
+	waitForEventType(t, client.Events(), protocol.TypeHello)
+	waitForStatusState(t, statuses, StateConnected)
+
+	_ = firstServer.Close()
+	resolved <- "192.0.2.11:42000"
+	if address := <-dialed; address != "192.0.2.11:42000" {
+		t.Fatalf("second dial address=%q", address)
+	}
+	waitForStatusState(t, statuses, StateReconnecting)
+	writeHello(t, secondServer, "Galaxy test")
+	waitForEventType(t, client.Events(), protocol.TypeHello)
+	waitForStatusState(t, statuses, StateConnected)
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("client did not stop")
+	}
+}
+
+func TestClientReconnectsAfterHeartbeatTimeout(t *testing.T) {
+	firstClient, firstServer := net.Pipe()
+	secondClient, secondServer := net.Pipe()
+	defer firstServer.Close()
+	defer secondServer.Close()
+	clientConnections := make(chan net.Conn, 2)
+	clientConnections <- firstClient
+	clientConnections <- secondClient
+	dials := make(chan struct{}, 2)
+
+	client := newClient(Config{
+		Address:           "synthetic",
+		HeartbeatInterval: 5 * time.Millisecond,
+		PongTimeout:       15 * time.Millisecond,
+		ReconnectMinimum:  time.Millisecond,
+		ReconnectMaximum:  time.Millisecond,
+	}, func(context.Context, string, string) (net.Conn, error) {
+		dials <- struct{}{}
+		return <-clientConnections, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	statuses := client.SubscribeStatus(ctx)
+	runDone := make(chan error, 1)
+	go func() { runDone <- client.Run(ctx) }()
+
+	<-dials
+	writeHello(t, firstServer, "Galaxy test")
+	waitForEventType(t, client.Events(), protocol.TypeHello)
+	waitForStatusState(t, statuses, StateConnected)
+	go func() {
+		for {
+			if _, err := protocol.ReadFrame(firstServer); err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-dials:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat timeout did not trigger reconnect")
+	}
+	waitForStatusState(t, statuses, StateReconnecting)
+	writeHello(t, secondServer, "Galaxy test")
+	waitForEventType(t, client.Events(), protocol.TypeHello)
+	waitForStatusState(t, statuses, StateConnected)
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("client did not stop")
+	}
+}
+
+func TestClientStatusSubscriptionKeepsLatestStateAndClosesWithContext(t *testing.T) {
+	client := newClient(Config{}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	updates := client.SubscribeStatus(ctx)
+	if initial := <-updates; initial.State != string(StateDisconnected) {
+		t.Fatalf("initial status=%+v", initial)
+	}
+
+	client.publishState(StateChange{State: StateConnecting})
+	client.publishState(StateChange{State: StateDisconnected})
+	client.publishState(StateChange{State: StateReconnecting})
+	if latest := <-updates; latest.State != string(StateReconnecting) {
+		t.Fatalf("latest status=%+v", latest)
+	}
+
+	cancel()
+	select {
+	case _, open := <-updates:
+		if open {
+			t.Fatal("status stream remained open")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("status stream did not close")
+	}
+}
+
 func TestWaitConnectedRequiresHelloHandshake(t *testing.T) {
 	clientConn, serverConn := net.Pipe()
 	defer serverConn.Close()
@@ -418,5 +567,35 @@ func waitForEventType(t *testing.T, events <-chan protocol.Envelope, messageType
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for %s", messageType)
 		return protocol.Envelope{}
+	}
+}
+
+func writeHello(t *testing.T, conn net.Conn, deviceName string) {
+	t.Helper()
+	hello, err := protocol.NewEnvelope(protocol.TypeHello, "", 0, protocol.HelloPayload{
+		DeviceID: "synthetic", DeviceName: deviceName,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = protocol.WriteFrame(conn, hello) }()
+}
+
+func waitForStatusState(t *testing.T, statuses <-chan domain.ApplicationStatus, state ConnectionState) domain.ApplicationStatus {
+	t.Helper()
+	timeout := time.After(time.Second)
+	for {
+		select {
+		case status, open := <-statuses:
+			if !open {
+				t.Fatalf("status stream closed before %s", state)
+			}
+			if status.State == string(state) {
+				return status
+			}
+		case <-timeout:
+			t.Fatalf("timed out waiting for status %s", state)
+			return domain.ApplicationStatus{}
+		}
 	}
 }

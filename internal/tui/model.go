@@ -60,6 +60,14 @@ type messageEventMsg struct {
 	closed  bool
 }
 
+type statusStreamMsg struct {
+	updates <-chan domain.ApplicationStatus
+}
+type statusEventMsg struct {
+	status domain.ApplicationStatus
+	closed bool
+}
+
 type shutdownMsg struct{ err error }
 type tickMsg time.Time
 
@@ -85,6 +93,7 @@ type Model struct {
 	eventMessages   <-chan domain.Message
 	eventErrors     <-chan error
 	eventDriven     bool
+	statusUpdates   <-chan domain.ApplicationStatus
 	searchQuery     string
 	searchScreen    screen
 }
@@ -114,7 +123,7 @@ func NewModel(ctx context.Context, service app.API, interval time.Duration) Mode
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.loadConversations(), m.connectEvents(), m.tick())
+	return tea.Batch(m.loadConversations(), m.connectEvents(), m.connectStatusEvents(), m.tick())
 }
 
 func (m Model) selectedID() int64 {
@@ -164,7 +173,10 @@ func (m *Model) refreshStatus() {
 	if m.sending {
 		return
 	}
-	status := m.service.Status(m.ctx)
+	m.applyStatus(m.service.Status(m.ctx))
+}
+
+func (m *Model) applyStatus(status domain.ApplicationStatus) {
 	if status.Label != "" {
 		m.status = status.Label
 	}

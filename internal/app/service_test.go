@@ -127,6 +127,15 @@ type fixedStatus struct{ value domain.ApplicationStatus }
 
 func (f fixedStatus) Status(context.Context) domain.ApplicationStatus { return f.value }
 
+type fixedStatusEvents struct {
+	fixedStatus
+	updates chan domain.ApplicationStatus
+}
+
+func (events fixedStatusEvents) SubscribeStatus(context.Context) <-chan domain.ApplicationStatus {
+	return events.updates
+}
+
 func TestServiceUsesDynamicStatusProvider(t *testing.T) {
 	service, _, _ := serviceFixture(NotificationPolicy{})
 	service.WithStatusProvider(fixedStatus{value: domain.ApplicationStatus{
@@ -135,6 +144,21 @@ func TestServiceUsesDynamicStatusProvider(t *testing.T) {
 	got := service.Status(context.Background())
 	if got.Label != "Offline" || got.State != "disconnected" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestServiceExposesStatusEventsFromDynamicProvider(t *testing.T) {
+	service, _, _ := serviceFixture(NotificationPolicy{})
+	if updates := service.SubscribeStatus(context.Background()); updates != nil {
+		t.Fatal("legacy service unexpectedly exposed status events")
+	}
+	events := fixedStatusEvents{
+		fixedStatus: fixedStatus{value: domain.ApplicationStatus{State: "connected"}},
+		updates:     make(chan domain.ApplicationStatus, 1),
+	}
+	service.WithStatusProvider(events)
+	if updates := service.SubscribeStatus(context.Background()); updates != events.updates {
+		t.Fatal("dynamic status event source was not exposed")
 	}
 }
 

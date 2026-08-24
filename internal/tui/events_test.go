@@ -63,4 +63,25 @@ func TestClosedEventStreamFallsBackToTick(t *testing.T) {
 	}
 }
 
+func TestStatusEventRefreshesConnectionWithoutMessagePolling(t *testing.T) {
+	model, _ := fixture(t)
+	updates := make(chan domain.ApplicationStatus, 1)
+	updated, command := model.Update(statusStreamMsg{updates: updates})
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("status stream did not start")
+	}
+	updates <- domain.ApplicationStatus{
+		State: "reconnecting", Label: "Reconnecting", Device: "Galaxy Test",
+	}
+	updated, next := model.Update(command())
+	model = updated.(Model)
+	if model.connectionState != "reconnecting" || model.status != "Reconnecting" || model.deviceName != "Galaxy Test" {
+		t.Fatalf("status=%q state=%q device=%q", model.status, model.connectionState, model.deviceName)
+	}
+	if next == nil {
+		t.Fatal("status listener was not rearmed")
+	}
+}
+
 var _ tea.Model = Model{}

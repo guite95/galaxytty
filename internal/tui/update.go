@@ -42,6 +42,24 @@ func (m Model) connectEvents() tea.Cmd {
 	}
 }
 
+func (m Model) connectStatusEvents() tea.Cmd {
+	return func() tea.Msg {
+		return statusStreamMsg{updates: m.service.SubscribeStatus(m.ctx)}
+	}
+}
+
+func (m Model) waitForStatus() tea.Cmd {
+	updates := m.statusUpdates
+	return func() tea.Msg {
+		select {
+		case <-m.ctx.Done():
+			return statusEventMsg{closed: true}
+		case status, open := <-updates:
+			return statusEventMsg{status: status, closed: !open}
+		}
+	}
+}
+
 func (m Model) waitForEvent() tea.Cmd {
 	messages := m.eventMessages
 	errorsChannel := m.eventErrors
@@ -147,6 +165,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.eventDriven {
 			return m, m.waitForEvent()
 		}
+	case statusStreamMsg:
+		m.statusUpdates = typed.updates
+		if m.statusUpdates != nil {
+			return m, m.waitForStatus()
+		}
+	case statusEventMsg:
+		if typed.closed {
+			m.statusUpdates = nil
+			return m, nil
+		}
+		m.applyStatus(typed.status)
+		return m, m.waitForStatus()
 	case messageEventMsg:
 		if typed.closed {
 			m.eventDriven = false

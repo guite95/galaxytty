@@ -104,6 +104,13 @@ requests only a missing sequence range after a live gap or reconnect, suppresses
 duplicate recovered messages, and falls back to a full encrypted read refresh
 when the Helper process has restarted or the journal cannot prove completeness.
 
+The persistent client resolves DNS-SD again before every connection attempt,
+so a Helper port or Galaxy IP change is not pinned to the previous endpoint.
+Connection, disconnection, and reconnection states flow through the application
+service to the TUI without restoring message polling. A half-open session that
+stops answering encrypted heartbeats is closed and enters the same bounded
+rediscovery loop.
+
 The application layer can now route an existing notification conversation by
 opaque `threadId` through `SEND_REPLY`; the Mac does not need a phone number and
 still does not know Samsung-specific details. The Helper retains the matching

@@ -109,6 +109,9 @@ type ApplicationStatus struct {
 type StatusProvider interface {
 	Status(context.Context) ApplicationStatus
 }
+type StatusEventSource interface {
+	SubscribeStatus(context.Context) <-chan ApplicationStatus
+}
 type Contacts interface {
 	Resolve(context.Context, string) (Contact, error)
 }

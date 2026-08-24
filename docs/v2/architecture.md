@@ -115,6 +115,20 @@ conversation/history refresh. A sequence epoch moving backward means the
 Helper process restarted and also triggers a full refresh rather than a false
 replay-success claim.
 
+## Connection lifecycle boundary
+
+The Mac resolves the Helper service before every dial rather than caching the
+first IP and dynamic port for the process lifetime. Disconnects, DNS-SD misses,
+dial failures, and heartbeat timeouts enter a bounded exponential retry loop;
+once any authenticated session has succeeded, subsequent attempts are exposed
+as `reconnecting` rather than an initial `connecting` state.
+
+The Remote Client implements the domain-level status provider and event source.
+The Application Service forwards those status events, and the TUI subscribes to
+them independently from message events. This keeps TCP and DNS-SD out of the UI
+while allowing connection indicators to update immediately without polling the
+message store.
+
 The HMAC challenge performs mutual credential confirmation. All subsequent
 protocol envelopes use directional HKDF-SHA256 session keys and AES-256-GCM
 frames with monotonic counters. Notification content parsing, bounded

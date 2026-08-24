@@ -24,6 +24,7 @@ type API interface {
 	InitializePolling(context.Context) error
 	Poll(context.Context, int64) ([]domain.Message, error)
 	SubscribeMessages(context.Context) (<-chan domain.Message, <-chan error)
+	SubscribeStatus(context.Context) <-chan domain.ApplicationStatus
 	Status(context.Context) domain.ApplicationStatus
 	Shutdown(context.Context) error
 }
@@ -126,6 +127,13 @@ func (s *Service) SubscribeMessages(ctx context.Context) (<-chan domain.Message,
 		return nil, nil
 	}
 	return s.events.SubscribeMessages(ctx)
+}
+func (s *Service) SubscribeStatus(ctx context.Context) <-chan domain.ApplicationStatus {
+	events, ok := s.statusProvider.(domain.StatusEventSource)
+	if !ok {
+		return nil
+	}
+	return events.SubscribeStatus(ctx)
 }
 func (s *Service) shouldNotify(m domain.Message, focused int64) bool {
 	return s.policy.Enabled && m.Direction == domain.DirectionIncoming && (s.policy.ShowWhenFocused || m.ThreadID != focused)

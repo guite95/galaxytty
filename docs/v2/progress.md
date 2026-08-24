@@ -204,3 +204,16 @@ send has been authorized for this work.
   cursor beyond real message IDs; the fresh empty journal correctly returned
   `complete=false` with zero items. No private fields were logged, and no
   notification action or message send was executed.
+- The Mac reconnect path now publishes initial connection, disconnection, and
+  reconnection states through a domain/application status-event port. The TUI
+  updates its indicator immediately and no longer styles `connecting` or
+  `reconnecting` as a successful connection. Each retry resolves DNS-SD again,
+  allowing a changed Galaxy IP or Helper port to replace the stale endpoint.
+  Deterministic tests cover endpoint replacement, heartbeat-timeout recovery,
+  latest-state delivery, application forwarding, TUI subscription, and race
+  safety without changing the device network or sending a message.
+- The reference Galaxy remained available over Wireless ADB after the Mac-only
+  reconnect change. Notification Access, `READ_SMS`, and the foreground bridge
+  were ready, and a fresh automatic DNS-SD discovery plus encrypted doctor
+  heartbeat succeeded. Wi-Fi was not toggled, no notification action ran, and
+  no message was sent.

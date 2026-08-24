@@ -31,6 +31,7 @@ type ConnectionState string
 
 const (
 	StateConnecting   ConnectionState = "connecting"
+	StateReconnecting ConnectionState = "reconnecting"
 	StateConnected    ConnectionState = "connected"
 	StateDisconnected ConnectionState = "disconnected"
 )
@@ -83,14 +84,17 @@ type Client struct {
 	gaps   chan SequenceGap
 	states chan StateChange
 
-	lastPong      atomic.Int64
-	lastSequence  atomic.Uint64
-	connected     chan struct{}
-	connectErrors chan error
-	connectedOnce sync.Once
-	statusMu      sync.RWMutex
-	state         ConnectionState
-	deviceName    string
+	lastPong               atomic.Int64
+	lastSequence           atomic.Uint64
+	everConnected          atomic.Bool
+	connected              chan struct{}
+	connectErrors          chan error
+	connectedOnce          sync.Once
+	statusMu               sync.RWMutex
+	state                  ConnectionState
+	deviceName             string
+	statusSubscriptions    map[uint64]chan domain.ApplicationStatus
+	nextStatusSubscription uint64
 }
 
 func NewClient(config Config) (*Client, error) {
@@ -105,16 +109,17 @@ func NewClient(config Config) (*Client, error) {
 func newClient(config Config, dial dialFunc) *Client {
 	staticAddress := config.Address
 	return &Client{
-		config:        config.withDefaults(),
-		dial:          dial,
-		address:       func(context.Context) (string, error) { return staticAddress, nil },
-		pending:       make(map[string]chan response),
-		events:        make(chan protocol.Envelope, 64),
-		gaps:          make(chan SequenceGap, 8),
-		states:        make(chan StateChange, 16),
-		connected:     make(chan struct{}),
-		connectErrors: make(chan error, 1),
-		state:         StateDisconnected,
+		config:              config.withDefaults(),
+		dial:                dial,
+		address:             func(context.Context) (string, error) { return staticAddress, nil },
+		pending:             make(map[string]chan response),
+		events:              make(chan protocol.Envelope, 64),
+		gaps:                make(chan SequenceGap, 8),
+		states:              make(chan StateChange, 16),
+		connected:           make(chan struct{}),
+		connectErrors:       make(chan error, 1),
+		state:               StateDisconnected,
+		statusSubscriptions: make(map[uint64]chan domain.ApplicationStatus),
 	}
 }
 
@@ -166,9 +171,15 @@ func (client *Client) WaitConnected(ctx context.Context) error {
 func (client *Client) Status(context.Context) domain.ApplicationStatus {
 	client.statusMu.RLock()
 	defer client.statusMu.RUnlock()
+	return client.statusLocked()
+}
+
+func (client *Client) statusLocked() domain.ApplicationStatus {
 	label := "Offline"
 	if client.state == StateConnecting {
 		label = "Connecting"
+	} else if client.state == StateReconnecting {
+		label = "Reconnecting"
 	} else if client.state == StateConnected {
 		label = "Local Wi-Fi"
 	}
@@ -176,6 +187,27 @@ func (client *Client) Status(context.Context) domain.ApplicationStatus {
 		State: string(client.state), Connection: domain.ConnectionWireless,
 		Label: label, Device: client.deviceName,
 	}
+}
+
+func (client *Client) SubscribeStatus(ctx context.Context) <-chan domain.ApplicationStatus {
+	updates := make(chan domain.ApplicationStatus, 1)
+	client.statusMu.Lock()
+	client.nextStatusSubscription++
+	id := client.nextStatusSubscription
+	client.statusSubscriptions[id] = updates
+	updates <- client.statusLocked()
+	client.statusMu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		client.statusMu.Lock()
+		if current, found := client.statusSubscriptions[id]; found && current == updates {
+			delete(client.statusSubscriptions, id)
+			close(updates)
+		}
+		client.statusMu.Unlock()
+	}()
+	return updates
 }
 
 // Run maintains one persistent session and reconnects with bounded exponential
@@ -187,7 +219,11 @@ func (client *Client) Run(ctx context.Context) error {
 			client.closeCurrent()
 			return nil
 		}
-		client.publishState(StateChange{State: StateConnecting})
+		state := StateConnecting
+		if client.everConnected.Load() {
+			state = StateReconnecting
+		}
+		client.publishState(StateChange{State: state})
 		address, err := client.address(ctx)
 		if err != nil {
 			client.publishState(StateChange{State: StateDisconnected, Err: err})
@@ -267,6 +303,7 @@ func (client *Client) serve(ctx context.Context, conn net.Conn) error {
 	client.statusMu.Lock()
 	client.deviceName = hello.DeviceName
 	client.statusMu.Unlock()
+	client.everConnected.Store(true)
 	client.publishState(StateChange{State: StateConnected})
 	client.connectedOnce.Do(func() { close(client.connected) })
 	select {
@@ -481,6 +518,21 @@ func (client *Client) closeCurrent() {
 func (client *Client) publishState(change StateChange) {
 	client.statusMu.Lock()
 	client.state = change.State
+	status := client.statusLocked()
+	for _, updates := range client.statusSubscriptions {
+		select {
+		case updates <- status:
+		default:
+			select {
+			case <-updates:
+			default:
+			}
+			select {
+			case updates <- status:
+			default:
+			}
+		}
+	}
 	client.statusMu.Unlock()
 	select {
 	case client.states <- change:

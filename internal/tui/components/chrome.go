@@ -34,7 +34,7 @@ func ErrorLine(theme Theme, value string, width int) string {
 
 func isConnected(state string) bool {
 	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "", "connected", "connecting", "ready", "usb", "wireless", "mock connected":
+	case "", "connected", "ready", "usb", "wireless", "mock connected":
 		return true
 	default:
 		return false
@@ -44,8 +44,10 @@ func isConnected(state string) bool {
 func connectionLabel(state string) string {
 	state = strings.ToLower(strings.TrimSpace(state))
 	switch state {
-	case "", "connected", "connecting", "ready", "usb", "wireless", "mock connected":
+	case "", "connected", "ready", "usb", "wireless", "mock connected":
 		return "connected"
+	case "connecting", "reconnecting":
+		return state
 	case "unauthorized":
 		return "authorization required"
 	case "sending…", "sending...":
