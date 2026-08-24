@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GalaxyTTY Helper</string>
+    <string name="notification_listener_label">GalaxyTTY notification bridge</string>
+    <string name="app_subtitle">Local Samsung Messages bridge and RemoteInput observation PoC</string>
+    <string name="start_bridge">Start background bridge</string>
+    <string name="stop_bridge">Stop background bridge</string>
+    <string name="open_notification_access">Open notification access</string>
+    <string name="allow_sms_history">Allow SMS history (read-only)</string>
+    <string name="refresh_observations">Refresh observations</string>
+    <string name="toggle_pairing_code">Show / hide pairing code</string>
+</resources>
