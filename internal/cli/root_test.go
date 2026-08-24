@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/galaxytty/galaxytty/internal/adb"
 	"github.com/galaxytty/galaxytty/internal/app"
@@ -17,6 +18,7 @@ import (
 	"github.com/galaxytty/galaxytty/internal/doctor"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/mock"
+	"github.com/galaxytty/galaxytty/internal/remote"
 )
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -110,6 +112,124 @@ func TestRealModeUsesConfiguredDeviceAndCLIOverride(t *testing.T) {
 	}
 	if gotSelector != "cli-target" {
 		t.Fatalf("selector=%q", gotSelector)
+	}
+}
+
+func TestHelperModeUsesAutomaticDiscoveryOrDebugAddress(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var addresses []string
+	deps := dependencies{helper: func(_ context.Context, cfg config.Config, address string) (*bootstrap.Runtime, error) {
+		addresses = append(addresses, address)
+		return bootstrap.Mock(cfg)
+	}}
+	for _, args := range [][]string{
+		{"conversations", "--helper"},
+		{"conversations", "--helper", "--helper-address", "192.0.2.10:43127"},
+	} {
+		var out bytes.Buffer
+		if err := execute(context.Background(), strings.NewReader(""), &out, args, deps); err != nil {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+	if len(addresses) != 2 || addresses[0] != "" || addresses[1] != "192.0.2.10:43127" {
+		t.Fatalf("addresses=%v", addresses)
+	}
+}
+
+func TestHelperFlagsRejectUnsafeOrAmbiguousCombinations(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"conversations", "--mock", "--helper"},
+		{"conversations", "--helper-address", "192.0.2.10:43127"},
+	} {
+		var out bytes.Buffer
+		if err := execute(context.Background(), strings.NewReader(""), &out, args, dependencies{}); err == nil {
+			t.Fatalf("args=%v expected error", args)
+		}
+	}
+}
+
+func TestHelperDoctorDoesNotInvokeMessagingCommands(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	called := false
+	deps := dependencies{helper: func(_ context.Context, cfg config.Config, _ string) (*bootstrap.Runtime, error) {
+		called = true
+		return bootstrap.Mock(cfg)
+	}}
+	var out bytes.Buffer
+	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor", "--helper"}, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !called || !strings.Contains(out.String(), "read-only PoC") {
+		t.Fatalf("called=%t output=%q", called, out.String())
+	}
+}
+
+func TestHelperLatencyPrintsTimingOnly(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{latency: func(_ context.Context, address string) (remote.LatencyResult, error) {
+		if address != "192.0.2.10:43127" {
+			t.Fatalf("address=%q", address)
+		}
+		return remote.LatencyResult{
+			NotificationToMac: 187 * time.Millisecond,
+			CalibrationRTT:    4 * time.Millisecond,
+			ClockOffset:       82 * time.Millisecond,
+		}, nil
+	}}
+	var out bytes.Buffer
+	if err := execute(
+		context.Background(),
+		strings.NewReader(""),
+		&out,
+		[]string{"latency", "--helper", "--helper-address", "192.0.2.10:43127"},
+		deps,
+	); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, expected := range []string{
+		"Latency probe armed",
+		"notification_to_mac_ms=187",
+		"calibration_rtt_ms=4",
+		"clock_offset_ms=82",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("output=%q missing %q", text, expected)
+		}
+	}
+}
+
+func TestPairReadsCodePrivatelyAndDoesNotRequireHelperFlag(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	const code = "AAAQ-EAYE-AUDA-OCAJ-BIFQ-YDIO-B4IB-CEQT"
+	var receivedAddress, receivedCode string
+	deps := dependencies{pair: func(_ context.Context, address, pairingCode string) (remote.PairResult, error) {
+		receivedAddress, receivedCode = address, pairingCode
+		return remote.PairResult{DeviceName: "Galaxy Test"}, nil
+	}}
+	var out bytes.Buffer
+	err := execute(context.Background(), strings.NewReader(code+"\n"), &out, []string{"pair", "--helper-address", "192.0.2.10:43127"}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receivedAddress != "192.0.2.10:43127" || receivedCode != code {
+		t.Fatalf("address=%q code matched=%t", receivedAddress, receivedCode == code)
+	}
+	if strings.Contains(out.String(), code) || !strings.Contains(out.String(), "Paired with Galaxy Test") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestPairJSONRemainsMachineReadableAndDoesNotPrintPrompt(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{pair: func(context.Context, string, string) (remote.PairResult, error) {
+		return remote.PairResult{DeviceName: "Galaxy Test"}, nil
+	}}
+	var out bytes.Buffer
+	err := execute(context.Background(), strings.NewReader("AAAQ-EAYE-AUDA-OCAJ-BIFQ-YDIO-B4IB-CEQT\n"), &out, []string{"pair", "--json"}, deps)
+	if err != nil || !json.Valid(out.Bytes()) || strings.Contains(out.String(), "Pairing code") {
+		t.Fatalf("output=%q err=%v", out.String(), err)
 	}
 }
 

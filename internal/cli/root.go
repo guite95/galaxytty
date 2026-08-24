@@ -1,39 +1,60 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/galaxytty/galaxytty/internal/app"
 	"github.com/galaxytty/galaxytty/internal/bootstrap"
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/doctor"
 	"github.com/galaxytty/galaxytty/internal/domain"
+	"github.com/galaxytty/galaxytty/internal/pairing"
+	"github.com/galaxytty/galaxytty/internal/remote"
 	"github.com/galaxytty/galaxytty/internal/tui"
 )
 
 type options struct {
 	mock    bool
+	helper  bool
 	json    bool
 	help    bool
 	device  string
+	address string
 	command []string
 }
 
 type dependencies struct {
-	mock   func(config.Config) (*bootstrap.Runtime, error)
-	real   func(context.Context, config.Config, string) (*bootstrap.Runtime, error)
-	doctor func(context.Context, config.Config, string) doctor.Report
+	mock    func(config.Config) (*bootstrap.Runtime, error)
+	real    func(context.Context, config.Config, string) (*bootstrap.Runtime, error)
+	helper  func(context.Context, config.Config, string) (*bootstrap.Runtime, error)
+	doctor  func(context.Context, config.Config, string) doctor.Report
+	pair    func(context.Context, string, string) (remote.PairResult, error)
+	latency func(context.Context, string) (remote.LatencyResult, error)
 }
 
 func defaultDependencies() dependencies {
-	return dependencies{mock: bootstrap.Mock, real: bootstrap.Real, doctor: doctor.Run}
+	return dependencies{
+		mock: bootstrap.Mock, real: bootstrap.Real, helper: bootstrap.Helper, doctor: doctor.Run,
+		pair: func(ctx context.Context, address, code string) (remote.PairResult, error) {
+			store, err := pairing.DefaultStore()
+			if err != nil {
+				return remote.PairResult{}, err
+			}
+			return remote.Pair(ctx, remote.Config{Address: address}, remote.NewDiscovery(4*time.Second), code, store)
+		},
+		latency: measureHelperLatency,
+	}
 }
 
 func (d dependencies) withDefaults() dependencies {
@@ -44,8 +65,17 @@ func (d dependencies) withDefaults() dependencies {
 	if d.real == nil {
 		d.real = defaults.real
 	}
+	if d.helper == nil {
+		d.helper = defaults.helper
+	}
 	if d.doctor == nil {
 		d.doctor = defaults.doctor
+	}
+	if d.pair == nil {
+		d.pair = defaults.pair
+	}
+	if d.latency == nil {
+		d.latency = defaults.latency
 	}
 	return d
 }
@@ -66,6 +96,16 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		printHelp(out)
 		return nil
 	}
+	command := ""
+	if len(opts.command) > 0 {
+		command = opts.command[0]
+	}
+	if opts.mock && opts.helper {
+		return fmt.Errorf("--mock and --helper cannot be used together")
+	}
+	if opts.address != "" && !opts.helper && command != "pair" {
+		return fmt.Errorf("--helper-address requires --helper")
+	}
 	path, err := config.Path()
 	if err != nil {
 		return fmt.Errorf("resolve config path: %w", err)
@@ -76,13 +116,45 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 	}
 	deps = deps.withDefaults()
 
-	command := ""
-	if len(opts.command) > 0 {
-		command = opts.command[0]
+	if command == "pair" {
+		if opts.mock {
+			return fmt.Errorf("pairing is only available for Galaxy Helper")
+		}
+		promptOut := out
+		if opts.json {
+			promptOut = io.Discard
+		}
+		code, readErr := readPairingCode(in, promptOut)
+		if readErr != nil {
+			return readErr
+		}
+		result, pairErr := deps.pair(ctx, opts.address, code)
+		if pairErr != nil {
+			return pairErr
+		}
+		if opts.json {
+			return json.NewEncoder(out).Encode(pairResponse{Paired: true, Device: result.DeviceName})
+		}
+		fmt.Fprintf(out, "Paired with %s.\n", result.DeviceName)
+		return nil
 	}
 	if command == "doctor" {
 		if opts.mock {
 			fmt.Fprintln(out, "GalaxyTTY Doctor\n\n✓ mock adapters          ready\n✓ SMS Provider fixture   accessible\n✓ Virtual Display fake   supported\n\nConnection:\n  Mock\n\nRead: ready\nSend: ready")
+			return nil
+		}
+		if opts.helper {
+			runtime, helperErr := deps.helper(ctx, cfg, opts.address)
+			if helperErr != nil {
+				return helperErr
+			}
+			defer runtime.Service.Shutdown(context.Background())
+			status := runtime.Service.Status(ctx)
+			fmt.Fprintln(out, "GalaxyTTY Helper Doctor")
+			fmt.Fprintln(out)
+			fmt.Fprintf(out, "✓ discovery / local TCP  %s\n", status.Label)
+			fmt.Fprintf(out, "✓ device                 %s\n", status.Device)
+			fmt.Fprintln(out, "○ messaging commands     read-only PoC")
 			return nil
 		}
 		report := deps.doctor(ctx, cfg, opts.device)
@@ -92,10 +164,26 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		}
 		return nil
 	}
+	if command == "latency" {
+		if !opts.helper {
+			return fmt.Errorf("latency measurement is only available with --helper")
+		}
+		fmt.Fprintln(out, "Latency probe armed; waiting for the next Samsung Messages notification...")
+		result, latencyErr := deps.latency(ctx, opts.address)
+		if latencyErr != nil {
+			return latencyErr
+		}
+		fmt.Fprintf(out, "notification_to_mac_ms=%d\n", result.NotificationToMac.Milliseconds())
+		fmt.Fprintf(out, "calibration_rtt_ms=%d\n", result.CalibrationRTT.Milliseconds())
+		fmt.Fprintf(out, "clock_offset_ms=%d\n", result.ClockOffset.Milliseconds())
+		return nil
+	}
 
 	var runtime *bootstrap.Runtime
 	if opts.mock {
 		runtime, err = deps.mock(cfg)
+	} else if opts.helper {
+		runtime, err = deps.helper(ctx, cfg, opts.address)
 	} else {
 		runtime, err = deps.real(ctx, cfg, opts.device)
 	}
@@ -215,9 +303,46 @@ func actionableRealError(err error) error {
 		return fmt.Errorf("%w. The outgoing provider row was not verified; check Samsung Messages before retrying", err)
 	case errors.Is(err, app.ErrGroupSendUnsupported):
 		return fmt.Errorf("Group conversation sending is not supported yet: %w", err)
+	case errors.Is(err, remote.ErrDiscoveryTimeout):
+		return fmt.Errorf("%w. Open GalaxyTTY Helper on a Galaxy connected to the same local network", err)
+	case errors.Is(err, remote.ErrNotConnected), errors.Is(err, remote.ErrDisconnected):
+		return fmt.Errorf("%w. Keep GalaxyTTY Helper running and verify local Wi-Fi connectivity", err)
+	case errors.Is(err, remote.ErrPairingRequired):
+		return fmt.Errorf("%w. Open Helper, reveal the pairing code, then run msg pair", err)
+	case errors.Is(err, remote.ErrAuthentication):
+		return fmt.Errorf("%w. Run msg pair again with the current Helper code", err)
+	case errors.Is(err, remote.ErrSendEvidenceUnavailable):
+		return fmt.Errorf("%w. Check Samsung Messages on the Galaxy before deciding whether to retry", err)
 	default:
 		return err
 	}
+}
+
+func measureHelperLatency(ctx context.Context, address string) (remote.LatencyResult, error) {
+	credentialStore, err := pairing.DefaultStore()
+	if err != nil {
+		return remote.LatencyResult{}, fmt.Errorf("configure Galaxy Helper credential store: %w", err)
+	}
+	clientConfig := remote.Config{Address: address, Credentials: credentialStore}
+	var client *remote.Client
+	if address == "" {
+		client, err = remote.NewDiscoveredClient(clientConfig, remote.NewDiscovery(4*time.Second))
+	} else {
+		client, err = remote.NewClient(clientConfig)
+	}
+	if err != nil {
+		return remote.LatencyResult{}, fmt.Errorf("configure Galaxy Helper latency client: %w", err)
+	}
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() { _ = client.Run(runContext) }()
+	waitContext, waitCancel := context.WithTimeout(ctx, 10*time.Second)
+	err = client.WaitConnected(waitContext)
+	waitCancel()
+	if err != nil {
+		return remote.LatencyResult{}, fmt.Errorf("connect to Galaxy Helper: %w", err)
+	}
+	return remote.MeasureNextMessage(ctx, client, 7)
 }
 
 type sendResponse struct {
@@ -226,12 +351,19 @@ type sendResponse struct {
 	ThreadID  int64 `json:"thread_id"`
 }
 
+type pairResponse struct {
+	Paired bool   `json:"paired"`
+	Device string `json:"device"`
+}
+
 func parseOptions(args []string) (options, error) {
 	var opts options
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
 		case "--mock":
 			opts.mock = true
+		case "--helper":
+			opts.helper = true
 		case "--json":
 			opts.json = true
 		case "--help", "-h":
@@ -242,6 +374,12 @@ func parseOptions(args []string) (options, error) {
 			}
 			index++
 			opts.device = args[index]
+		case "--helper-address":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return options{}, fmt.Errorf("--helper-address requires host:port")
+			}
+			index++
+			opts.address = args[index]
 		default:
 			opts.command = append(opts.command, args[index])
 		}
@@ -250,7 +388,24 @@ func parseOptions(args []string) (options, error) {
 }
 
 func printHelp(out io.Writer) {
-	fmt.Fprintln(out, "GalaxyTTY - Samsung Messages in your terminal.\n\nUsage: msg [--mock] [--json] [--device <adb-target>] [conversations|unread|messages|send|doctor]\nWithout a command, starts the TUI.")
+	fmt.Fprintln(out, "GalaxyTTY - Samsung Messages in your terminal.\n\nUsage: msg [--mock|--helper] [--json] [--device <adb-target>] [--helper-address <host:port>] [pair|conversations|unread|messages|send|doctor|latency]\nWithout a command, starts the TUI. Run 'msg pair' once before using Helper mode. --helper uses automatic local discovery; --helper-address is a debug fallback.")
+}
+
+func readPairingCode(in io.Reader, out io.Writer) (string, error) {
+	fmt.Fprint(out, "Pairing code: ")
+	if input, ok := in.(*os.File); ok && term.IsTerminal(input.Fd()) {
+		value, err := term.ReadPassword(input.Fd())
+		fmt.Fprintln(out)
+		if err != nil {
+			return "", fmt.Errorf("read pairing code: %w", err)
+		}
+		return strings.TrimSpace(string(value)), nil
+	}
+	value, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("read pairing code: %w", err)
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func printDoctor(out io.Writer, report doctor.Report) {

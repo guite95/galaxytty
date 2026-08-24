@@ -11,13 +11,17 @@ import (
 	"github.com/galaxytty/galaxytty/internal/config"
 	"github.com/galaxytty/galaxytty/internal/domain"
 	"github.com/galaxytty/galaxytty/internal/mock"
+	"github.com/galaxytty/galaxytty/internal/pairing"
+	"github.com/galaxytty/galaxytty/internal/protocol"
 	"github.com/galaxytty/galaxytty/internal/provider"
 	"github.com/galaxytty/galaxytty/internal/readonly"
+	"github.com/galaxytty/galaxytty/internal/remote"
 	"github.com/galaxytty/galaxytty/internal/samsung"
 	"github.com/galaxytty/galaxytty/internal/scrcpy"
 )
 
 const adbCommandTimeout = 5 * time.Second
+const helperConnectTimeout = 8 * time.Second
 
 const (
 	scrcpyStartupTimeout   = 10 * time.Second
@@ -60,6 +64,67 @@ func Real(ctx context.Context, cfg config.Config, selector string) (*Runtime, er
 		return nil, err
 	}
 	return realWithBackend(ctx, cfg, selector, client)
+}
+
+// Helper assembles the v2 adapters below the existing application service.
+// An empty address uses DNS-SD; a host:port value is a diagnostic fallback.
+func Helper(ctx context.Context, cfg config.Config, address string) (*Runtime, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	credentialStore, err := pairing.DefaultStore()
+	if err != nil {
+		return nil, fmt.Errorf("configure Galaxy Helper credential store: %w", err)
+	}
+	clientConfig := remote.Config{Address: address, Credentials: credentialStore}
+	var client *remote.Client
+	if address == "" {
+		client, err = remote.NewDiscoveredClient(clientConfig, remote.NewDiscovery(4*time.Second))
+	} else {
+		client, err = remote.NewClient(clientConfig)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("configure Galaxy Helper client: %w", err)
+	}
+	runContext, cancel := context.WithCancel(ctx)
+	go func() { _ = client.Run(runContext) }()
+	waitContext, waitCancel := context.WithTimeout(ctx, helperConnectTimeout)
+	err = client.WaitConnected(waitContext)
+	waitCancel()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("connect to Galaxy Helper: %w", err)
+	}
+	pingContext, pingCancel := context.WithTimeout(ctx, helperConnectTimeout)
+	pong, err := client.Request(pingContext, protocol.TypePing, map[string]any{"probe": true})
+	pingCancel()
+	if err != nil || pong.Type != protocol.TypePong {
+		cancel()
+		if err == nil {
+			err = fmt.Errorf("unexpected response %s", pong.Type)
+		}
+		return nil, fmt.Errorf("verify Galaxy Helper secure heartbeat: %w", err)
+	}
+
+	lifecycle := app.NewLifecycle(nil, readonly.Notifier{})
+	lifecycle.BindCancel(cancel)
+	if err := lifecycle.Transition(app.Connecting); err != nil {
+		cancel()
+		return nil, err
+	}
+	if err := lifecycle.Transition(app.Ready); err != nil {
+		cancel()
+		return nil, err
+	}
+	service := app.NewService(
+		remote.NewStore(client),
+		remote.NewSender(client),
+		readonly.Notifier{},
+		lifecycle,
+		app.NotificationPolicy{Enabled: cfg.Notifications.Enabled, ShowWhenFocused: cfg.Notifications.ShowWhenFocused},
+		client.Status(ctx),
+	).WithStatusProvider(client).WithMessageEvents(remote.NewEventSource(client))
+	return &Runtime{Service: service}, nil
 }
 
 func realWithBackend(ctx context.Context, cfg config.Config, selector string, backend adb.Backend) (*Runtime, error) {
