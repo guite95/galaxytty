@@ -154,7 +154,7 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 			fmt.Fprintln(out)
 			fmt.Fprintf(out, "✓ discovery / local TCP  %s\n", status.Label)
 			fmt.Fprintf(out, "✓ device                 %s\n", status.Device)
-			fmt.Fprintln(out, "○ reply execution        requires local Galaxy approval")
+			fmt.Fprintln(out, "○ reply execution        controlled on Galaxy; compose handoff supported")
 			return nil
 		}
 		report := deps.doctor(ctx, cfg, opts.device)
@@ -259,7 +259,8 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 			return err
 		}
 		response := sendResponse{
-			Success:   result.Outcome != domain.SendOutcomeAcceptedUnverified,
+			Success: result.Outcome != domain.SendOutcomeAcceptedUnverified &&
+				result.Outcome != domain.SendOutcomeUserActionRequired,
 			MessageID: result.MessageID,
 			ThreadID:  result.ThreadID,
 			Outcome:   result.Outcome,
@@ -270,6 +271,10 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		}
 		if result.Outcome == domain.SendOutcomeAcceptedUnverified {
 			fmt.Fprintln(out, "Samsung Messages accepted the send action; delivery is unverified.")
+			return nil
+		}
+		if result.Outcome == domain.SendOutcomeUserActionRequired {
+			fmt.Fprintln(out, "Reply prepared on the Galaxy; tap its notification to review and send.")
 			return nil
 		}
 		fmt.Fprintln(out, "Message sent.")

@@ -76,6 +76,14 @@ The Mac test also requires explicit environment gates and an authenticated
 capability preflight. PendingIntent acceptance is `accepted_unverified` until
 independent outgoing evidence exists.
 
+If that active action has expired, the Helper may resolve the selected opaque
+thread through the existing one-to-one SMS Provider conversation or a safe
+phone URI retained from its notification. It posts a privacy-safe local
+notification whose activity PendingIntent opens Samsung Messages with an
+`ACTION_SENDTO` draft. This respects Android background activity launch limits
+and leaves the final send under explicit Galaxy user control. The Mac receives
+`user_action_required`; it never promotes the draft to an outgoing message.
+
 The Go application service owns a memory-only accepted outbox. It overlays an
 outgoing bubble after `accepted_unverified` so UI refreshes do not hide an RCS
 reply merely because the SMS Provider has no row. The bubble is explicitly

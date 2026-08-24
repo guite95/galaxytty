@@ -261,3 +261,11 @@ consumed and does not authorize any additional real SMS/RCS/MMS send.
   renders `전송 요청됨 · 미검증`; matching time-bounded outgoing evidence
   reconciles one local echo at a time. No database or delivery inference was
   added.
+- Helper `0.12.0-poc` adds a no-active-notification compose fallback while
+  reusing the existing conversation repository. A resolvable one-to-one target
+  produces a generic local Helper notification; tapping it opens a prefilled
+  Samsung Messages composer. The correlated Mac outcome is
+  `user_action_required`, so no outgoing bubble or success claim is created.
+  Notification phone URIs and Provider addresses remain Helper-only and the
+  notification itself contains neither recipient nor body. Automated tests do
+  not post the notification or invoke its PendingIntent.

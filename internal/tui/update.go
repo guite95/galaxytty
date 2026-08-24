@@ -153,6 +153,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.noticeText = ""
 			if typed.result.Outcome == domain.SendOutcomeAcceptedUnverified {
 				m.noticeText = "Samsung Messages accepted the reply · delivery unverified"
+			} else if typed.result.Outcome == domain.SendOutcomeUserActionRequired {
+				m.noticeText = "Reply ready on Galaxy · tap the notification to review and send"
 			}
 			m.chatOffset = 0
 			return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))

@@ -28,6 +28,7 @@ class ReplyActionRegistryTest {
         val result = registry.dispatch(7, "synthetic reply")
 
         assertEquals(ReplyDispatchStatus.ACCEPTED_UNVERIFIED, result.status)
+        assertEquals("remote_input_pending_intent_accepted", result.evidence)
         assertEquals("synthetic reply", deliveredText)
     }
 

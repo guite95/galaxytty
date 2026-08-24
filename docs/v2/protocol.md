@@ -137,17 +137,18 @@ Mac requests a normal full read refresh instead of assuming recovery succeeded.
 
 `SEND_MESSAGE` and unimplemented send fallbacks
 still receive `ERROR` with `POC_READ_ONLY`. No unauthenticated peer can invoke
-read commands or receive message content. Release builds cannot invoke a reply
-PendingIntent. A debuggable APK requires a fresh private one-shot marker in
-addition to authenticated protocol access.
+read commands or receive message content. Reply execution remains blocked in
+every build until the Galaxy user enables the local permission. Debuggable APKs
+also retain a fresh private one-shot marker for deliberately gated integration
+tests.
 
 `GET_REPLY_CAPABILITY` accepts only an opaque `threadId` and returns a correlated
 `REPLY_CAPABILITY` containing `available: true|false`. It reveals no title,
 number, body, action key, or execution-gate state and does not consume the
 one-shot marker.
 
-`SEND_REPLY` addresses the active notification conversation rather than a
-transport or recipient:
+`SEND_REPLY` addresses the selected opaque conversation rather than a transport
+or recipient. An active notification action is preferred when available:
 
 ```json
 {
@@ -171,6 +172,27 @@ a session-only outgoing echo so an RCS reply does not disappear when the Helper
 history has no outgoing record. It is reconciled only against a matching,
 time-bounded outgoing source record and is never treated as delivery evidence.
 
+When no active RemoteInput action exists, a locally authorized request may use
+the Helper's existing one-to-one conversation address to post a generic compose
+handoff notification. Its correlated result is:
+
+```json
+{
+  "version": 1,
+  "type": "SEND_RESULT",
+  "requestId": "correlation-id",
+  "payload": {
+    "outcome": "user_action_required",
+    "evidence": "samsung_compose_notification_posted",
+    "threadId": 731
+  }
+}
+```
+
+The user must tap the Helper notification, review the prefilled Samsung
+Messages composer, and tap send. This outcome creates no outgoing echo and is
+not send or delivery evidence.
+
 The secure channel provides confidentiality, integrity, replay protection, and
 mutual credential confirmation for protocol frames. Notification cache state
 is not durable and remains bounded to 100 conversations and 200 messages per
@@ -182,4 +204,6 @@ When sending is enabled later, `SEND_RESULT.outcome` must be one of:
 - `verified`: outgoing evidence was observed and the Mac may report success;
 - `accepted_unverified`: an action was accepted but transport evidence was not
   available; the Mac reports acceptance and an unverified delivery state;
+- `user_action_required`: Samsung Messages composition was prepared on the
+  Galaxy, but the user must review and send it;
 - `failed`: the Helper observed a failure.

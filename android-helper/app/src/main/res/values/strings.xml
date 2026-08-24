@@ -14,4 +14,8 @@
     <string name="allow_remote_replies_title">Allow real message replies?</string>
     <string name="allow_remote_replies_warning">A paired GalaxyTTY client will be able to send real replies through Samsung Messages. Messages may reach other people or incur carrier charges. You can block replies here at any time.</string>
     <string name="allow_remote_replies_confirm">Allow replies</string>
+    <string name="compose_handoff_channel">GalaxyTTY reply handoff</string>
+    <string name="compose_handoff_channel_description">Replies waiting for review in Samsung Messages</string>
+    <string name="compose_handoff_title">Reply ready in Samsung Messages</string>
+    <string name="compose_handoff_text">Tap to review and send.</string>
 </resources>

@@ -93,6 +93,7 @@ type SendOutcome string
 const (
 	SendOutcomeVerified           SendOutcome = "verified"
 	SendOutcomeAcceptedUnverified SendOutcome = "accepted_unverified"
+	SendOutcomeUserActionRequired SendOutcome = "user_action_required"
 )
 
 type SendResult struct {

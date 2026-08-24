@@ -16,6 +16,8 @@ type conversationSender struct {
 
 type acceptedConversationSender struct{}
 
+type userActionConversationSender struct{}
+
 func (acceptedConversationSender) Send(context.Context, string, string) (domain.SendResult, error) {
 	return domain.SendResult{}, errors.New("address send must not be used")
 }
@@ -25,6 +27,18 @@ func (acceptedConversationSender) SendToConversation(_ context.Context, threadID
 		ThreadID: threadID,
 		Outcome:  domain.SendOutcomeAcceptedUnverified,
 		Evidence: "remote_input_pending_intent_accepted",
+	}, nil
+}
+
+func (userActionConversationSender) Send(context.Context, string, string) (domain.SendResult, error) {
+	return domain.SendResult{}, errors.New("address send must not be used")
+}
+
+func (userActionConversationSender) SendToConversation(_ context.Context, threadID int64, _ string) (domain.SendResult, error) {
+	return domain.SendResult{
+		ThreadID: threadID,
+		Outcome:  domain.SendOutcomeUserActionRequired,
+		Evidence: "samsung_compose_notification_posted",
 	}, nil
 }
 
@@ -128,6 +142,27 @@ func TestAcceptedUnverifiedConversationReplyAppearsInSessionMessages(t *testing.
 	source, err := backend.Messages(context.Background(), 1, domain.MessageQuery{})
 	if err != nil || len(source) != 2 {
 		t.Fatalf("source=%+v err=%v", source, err)
+	}
+}
+
+func TestUserActionRequiredDoesNotCreateOutgoingSessionMessage(t *testing.T) {
+	_, backend, notifier := serviceFixture(NotificationPolicy{})
+	service := NewService(
+		backend,
+		userActionConversationSender{},
+		notifier,
+		nil,
+		NotificationPolicy{},
+		domain.ApplicationStatus{},
+	)
+
+	result, err := service.SendToConversation(context.Background(), 1, "synthetic draft")
+	if err != nil || result.Outcome != domain.SendOutcomeUserActionRequired {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	messages, err := service.Messages(context.Background(), 1, domain.MessageQuery{})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("compose handoff must not create an outgoing message: messages=%+v err=%v", messages, err)
 	}
 }
 func TestPollingAndNotificationPolicy(t *testing.T) {

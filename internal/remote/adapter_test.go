@@ -82,6 +82,7 @@ func TestRemoteSenderDistinguishesAcceptedAndVerifiedOutcomes(t *testing.T) {
 	requester := &fakeRequester{responses: []protocol.Envelope{
 		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "accepted_unverified", "evidence": "remote_input_accepted", "threadId": 7}),
 		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "accepted_unverified", "evidence": "remote_input_accepted", "threadId": 7}),
+		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "user_action_required", "evidence": "samsung_compose_notification_posted", "threadId": 7}),
 		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "verified", "evidence": "outgoing_provider", "messageId": 41, "threadId": 7}),
 	}}
 	sender := NewSender(requester)
@@ -93,6 +94,11 @@ func TestRemoteSenderDistinguishesAcceptedAndVerifiedOutcomes(t *testing.T) {
 	if err != nil || accepted.Outcome != domain.SendOutcomeAcceptedUnverified {
 		t.Fatalf("accepted reply=%+v err=%v", accepted, err)
 	}
+	handoff, err := sender.SendToConversation(context.Background(), 7, "thread reply")
+	if err != nil || handoff.Outcome != domain.SendOutcomeUserActionRequired ||
+		handoff.ThreadID != 7 || handoff.Evidence != "samsung_compose_notification_posted" {
+		t.Fatalf("handoff=%+v err=%v", handoff, err)
+	}
 	result, err := sender.Send(context.Background(), "01012345678", "synthetic")
 	if err != nil || result != (domain.SendResult{
 		MessageID: 41,
@@ -102,7 +108,8 @@ func TestRemoteSenderDistinguishesAcceptedAndVerifiedOutcomes(t *testing.T) {
 	}) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	if requester.types[0] != protocol.TypeSendMessage || requester.types[1] != protocol.TypeSendReply {
+	if requester.types[0] != protocol.TypeSendMessage || requester.types[1] != protocol.TypeSendReply ||
+		requester.types[2] != protocol.TypeSendReply {
 		t.Fatalf("types=%v", requester.types)
 	}
 	reply := requester.payloads[1].(sendReplyPayload)

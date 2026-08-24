@@ -126,6 +126,38 @@ func TestAcceptedUnverifiedReplyClearsComposerAndShowsNotice(t *testing.T) {
 	}
 }
 
+type userActionRequiredSendAPI struct{ app.API }
+
+func (api userActionRequiredSendAPI) SendToConversation(_ context.Context, threadID int64, _ string) (domain.SendResult, error) {
+	return domain.SendResult{
+		ThreadID: threadID,
+		Outcome:  domain.SendOutcomeUserActionRequired,
+		Evidence: "samsung_compose_notification_posted",
+	}, nil
+}
+
+func TestComposeHandoffClearsComposerWithoutShowingOutgoingBubble(t *testing.T) {
+	model, _ := fixture(t)
+	model = open(t, model)
+	model.service = userActionRequiredSendAPI{API: model.service}
+	model = typeText(model, "synthetic reply")
+	initialMessages := len(model.messages)
+
+	updated, send := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, refresh := updated.(Model).Update(send())
+	got := updated.(Model)
+
+	if refresh == nil || got.sending || got.composer.Value() != "" || got.errorText != "" {
+		t.Fatalf("refresh=%v sending=%t composer=%q error=%q", refresh, got.sending, got.composer.Value(), got.errorText)
+	}
+	if got.noticeText != "Reply ready on Galaxy · tap the notification to review and send" {
+		t.Fatalf("notice=%q", got.noticeText)
+	}
+	if len(got.messages) != initialMessages {
+		t.Fatalf("compose handoff must not create an outgoing bubble: before=%d after=%d", initialMessages, len(got.messages))
+	}
+}
+
 type acceptedConversationSenderForTUI struct{}
 
 func (acceptedConversationSenderForTUI) Send(context.Context, string, string) (domain.SendResult, error) {

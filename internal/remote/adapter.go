@@ -131,6 +131,12 @@ func (sender *Sender) send(ctx context.Context, messageType protocol.Type, reque
 			Outcome:  domain.SendOutcomeAcceptedUnverified,
 			Evidence: resultPayload.Evidence,
 		}, nil
+	case "user_action_required":
+		return domain.SendResult{
+			ThreadID: resultPayload.ThreadID,
+			Outcome:  domain.SendOutcomeUserActionRequired,
+			Evidence: resultPayload.Evidence,
+		}, nil
 	default:
 		if strings.TrimSpace(resultPayload.Error) == "" {
 			resultPayload.Error = "Galaxy Helper reported send failure"

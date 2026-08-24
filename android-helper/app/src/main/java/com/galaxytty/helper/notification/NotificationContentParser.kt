@@ -9,6 +9,7 @@ data class NotificationTextCandidate(
     val senderLabel: String?,
     val postedAtMillis: Long,
     val fromCurrentUser: Boolean,
+    val replyAddress: String? = null,
 )
 
 class NotificationContentParser(
@@ -66,6 +67,7 @@ class NotificationContentParser(
             body = candidate.body,
             postedAtMillis = timestamp,
             source = source,
+            replyAddress = candidate.replyAddress,
         )
     }
 

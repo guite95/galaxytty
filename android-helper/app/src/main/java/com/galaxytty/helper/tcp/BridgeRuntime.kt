@@ -4,19 +4,24 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
 import com.galaxytty.helper.message.CompositeMessageStore
+import com.galaxytty.helper.message.CompositeConversationAddressResolver
 import com.galaxytty.helper.message.LiveMessageStore
 import com.galaxytty.helper.message.SmsRepository
+import com.galaxytty.helper.notification.ConversationTargetRegistry
 import com.galaxytty.helper.notification.NotificationObservation
 import com.galaxytty.helper.service.RemoteReplyPreferences
 import com.galaxytty.helper.samsung.AuthorizedReplyExecutionPolicy
+import com.galaxytty.helper.samsung.AddressedComposeReplyFallback
 import com.galaxytty.helper.samsung.ReplyAction
 import com.galaxytty.helper.samsung.ReplyActionRegistry
 import com.galaxytty.helper.samsung.ReplyExecutionPolicy
 import com.galaxytty.helper.samsung.OneShotReplyExecutionPolicy
+import com.galaxytty.helper.samsung.SamsungComposeNotificationPublisher
 import java.io.File
 
 object BridgeRuntime {
     private val messages = LiveMessageStore()
+    private val notificationTargets = ConversationTargetRegistry()
     @Volatile
     private var oneShotReplyExecution: OneShotReplyExecutionPolicy? = null
     @Volatile
@@ -28,10 +33,10 @@ object BridgeRuntime {
 
     @Synchronized
     fun start(context: Context): Int {
+        val appContext = context.applicationContext
         if (replyExecution == null) {
-            val appContext = context.applicationContext
             val oneShot = OneShotReplyExecutionPolicy(
-                markerFile = File(context.applicationContext.filesDir, OneShotReplyExecutionPolicy.MARKER_FILE_NAME),
+                markerFile = File(appContext.filesDir, OneShotReplyExecutionPolicy.MARKER_FILE_NAME),
                 enabled = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
             )
             oneShotReplyExecution = oneShot
@@ -41,7 +46,7 @@ object BridgeRuntime {
             )
         }
         val running = server ?: run {
-            val smsHistory = SmsRepository(context.applicationContext)
+            val smsHistory = SmsRepository(appContext)
             val combined = CompositeMessageStore(messages, smsHistory) { error ->
                 Log.w(TAG, "SMS history unavailable: ${error.javaClass.simpleName}")
             }
@@ -49,6 +54,10 @@ object BridgeRuntime {
                 context = context,
                 messageStore = combined,
                 replyActions = replies,
+                replyFallback = AddressedComposeReplyFallback(
+                    addresses = CompositeConversationAddressResolver(notificationTargets, smsHistory),
+                    publisher = SamsungComposeNotificationPublisher(appContext),
+                ),
                 smsHistoryAvailable = smsHistory::available,
             ).also { server = it }
         }
@@ -61,6 +70,9 @@ object BridgeRuntime {
     fun replyTestArmed(): Boolean = oneShotReplyExecution?.isArmed() == true
 
     fun publish(observation: NotificationObservation) {
+        observation.message?.let { message ->
+            notificationTargets.register(message.threadId, message.replyAddress)
+        }
         val contentIncluded = observation.message?.let(messages::add) == true
         synchronized(this) { server }?.publish(observation, contentIncluded)
     }

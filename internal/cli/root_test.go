@@ -160,7 +160,7 @@ func TestHelperDoctorDoesNotInvokeMessagingCommands(t *testing.T) {
 	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor", "--helper"}, deps); err != nil {
 		t.Fatal(err)
 	}
-	if !called || !strings.Contains(out.String(), "requires local Galaxy approval") {
+	if !called || !strings.Contains(out.String(), "controlled on Galaxy; compose handoff supported") {
 		t.Fatalf("called=%t output=%q", called, out.String())
 	}
 }
@@ -320,6 +320,42 @@ func TestRealSendJSONDoesNotClaimUnverifiedAcceptanceAsSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.Success || response.Outcome != domain.SendOutcomeAcceptedUnverified || response.MessageID != 0 {
+		t.Fatalf("response=%+v", response)
+	}
+}
+
+func TestRealSendReportsComposeHandoffAsUserActionRequired(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+		return runtimeWithSender(fixedSender{result: domain.SendResult{
+			ThreadID: 49,
+			Outcome:  domain.SendOutcomeUserActionRequired,
+			Evidence: "samsung_compose_notification_posted",
+		}}), nil
+	}}
+	var out bytes.Buffer
+	err := execute(context.Background(), strings.NewReader(""), &out, []string{
+		"send", "--to", "01012345678", "--text", "private body",
+	}, deps)
+	if err != nil || strings.TrimSpace(out.String()) != "Reply prepared on the Galaxy; tap its notification to review and send." {
+		t.Fatalf("out=%q err=%v", out.String(), err)
+	}
+	if strings.Contains(out.String(), "01012345678") || strings.Contains(out.String(), "private body") {
+		t.Fatalf("send output leaked private values: %q", out.String())
+	}
+
+	out.Reset()
+	err = execute(context.Background(), strings.NewReader(""), &out, []string{
+		"send", "--to", "01012345678", "--text", "private body", "--json",
+	}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response sendResponse
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Success || response.Outcome != domain.SendOutcomeUserActionRequired || response.MessageID != 0 {
 		t.Fatalf("response=%+v", response)
 	}
 }

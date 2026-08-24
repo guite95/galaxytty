@@ -20,7 +20,10 @@ import com.galaxytty.helper.security.PairingCredential
 import com.galaxytty.helper.security.PairingIdentity
 import com.galaxytty.helper.security.SessionAuthenticator
 import com.galaxytty.helper.samsung.ReplyActionRegistry
+import com.galaxytty.helper.samsung.DisabledReplyFallback
+import com.galaxytty.helper.samsung.ReplyDispatcher
 import com.galaxytty.helper.samsung.ReplyDispatchStatus
+import com.galaxytty.helper.samsung.ReplyFallback
 import java.io.Closeable
 import java.io.EOFException
 import java.net.ServerSocket
@@ -39,6 +42,7 @@ class GalaxyTcpServer(
     context: Context,
     private val messageStore: MessageRepository,
     private val replyActions: ReplyActionRegistry,
+    private val replyFallback: ReplyFallback = DisabledReplyFallback,
     private val smsHistoryAvailable: () -> Boolean = { false },
 ) : Closeable {
     private val appContext = context.applicationContext
@@ -59,6 +63,7 @@ class GalaxyTcpServer(
     }
     private val sequence = AtomicLong(0)
     private val replayJournal = EventReplayJournal()
+    private val replyDispatcher = ReplyDispatcher(replyActions, replyFallback)
     private var serverSocket: ServerSocket? = null
     private var activeSession: ClientSession? = null
 
@@ -378,18 +383,22 @@ class GalaxyTcpServer(
                         }
                         ProtocolTypes.SEND_REPLY -> {
                             val threadId = request.payload.optLong("threadId", 0)
-                            val result = replyActions.dispatch(
+                            val result = replyDispatcher.dispatch(
                                 threadId = threadId,
                                 text = request.payload.optString("text"),
                             )
                             val payload = when (result.status) {
                                 ReplyDispatchStatus.ACCEPTED_UNVERIFIED -> JSONObject()
                                     .put("outcome", "accepted_unverified")
-                                    .put("evidence", "remote_input_pending_intent_accepted")
+                                    .put("evidence", result.evidence ?: "remote_input_pending_intent_accepted")
+                                    .put("threadId", threadId)
+                                ReplyDispatchStatus.USER_ACTION_REQUIRED -> JSONObject()
+                                    .put("outcome", "user_action_required")
+                                    .put("evidence", result.evidence ?: "samsung_compose_notification_posted")
                                     .put("threadId", threadId)
                                 else -> JSONObject()
                                     .put("outcome", "failed")
-                                    .put("error", result.error ?: "RemoteInput reply failed")
+                                    .put("error", result.error ?: "Samsung Messages reply failed")
                             }
                             send(
                                 ProtocolEnvelope.create(

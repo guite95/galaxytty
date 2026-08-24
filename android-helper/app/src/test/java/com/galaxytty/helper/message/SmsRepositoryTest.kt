@@ -78,7 +78,41 @@ class SmsRepositoryTest {
         assertFalse(repository.available())
         assertTrue(repository.conversations().isEmpty())
         assertTrue(repository.messages(LiveMessageQuery(threadId = 1)).isEmpty())
+        assertEquals(null, repository.oneToOneAddress(1))
         assertTrue(source.queries.isEmpty())
+    }
+
+    @Test
+    fun resolvesOnlyOneToOneConversationAddress() {
+        val source = FakeSmsDataSource(
+            mapOf(
+                "content://mms-sms/canonical-addresses" to listOf(
+                    row("_id" to "12", "address" to "010-1234-5678"),
+                    row("_id" to "34", "address" to "010-9999-9999"),
+                ),
+                "content://mms-sms/conversations?simple=true" to listOf(
+                    row(
+                        "_id" to "5",
+                        "recipient_ids" to "12",
+                        "unread_count" to "0",
+                        "date" to "1700000000000",
+                        "snippet" to "synthetic snippet",
+                    ),
+                    row(
+                        "_id" to "6",
+                        "recipient_ids" to "12 34",
+                        "unread_count" to "0",
+                        "date" to "1699999999000",
+                        "snippet" to "synthetic group snippet",
+                    ),
+                ),
+            ),
+        )
+        val repository = SmsRepository(source) { true }
+
+        assertEquals("010-1234-5678", repository.oneToOneAddress(5))
+        assertEquals(null, repository.oneToOneAddress(6))
+        assertEquals(null, repository.oneToOneAddress(404))
     }
 
     private class FakeSmsDataSource(

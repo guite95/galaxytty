@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.service.notification.StatusBarNotification
 import com.galaxytty.helper.samsung.AndroidRemoteInputReplyAction
 import com.galaxytty.helper.samsung.ReplyAction
+import com.galaxytty.helper.samsung.SafePhoneAddress
 import com.galaxytty.helper.security.PairingCredential
 
 class SamsungMessagesAdapter(
@@ -99,6 +100,11 @@ class SamsungMessagesAdapter(
                         senderLabel = sender,
                         postedAtMillis = message.timestamp,
                         fromCurrentUser = sender.isNullOrBlank(),
+                        replyAddress = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            message.senderPerson?.uri?.let(::safeReplyAddress)
+                        } else {
+                            null
+                        },
                     )
                 }
         }.getOrDefault(emptyList())
@@ -106,6 +112,12 @@ class SamsungMessagesAdapter(
 
     private fun Bundle.charSequence(key: String): String? =
         getCharSequence(key)?.toString()?.trim()?.takeIf(String::isNotEmpty)
+
+    private fun safeReplyAddress(value: String): String? {
+        val uri = runCatching { android.net.Uri.parse(value) }.getOrNull() ?: return null
+        if (uri.scheme?.lowercase() !in SAFE_ADDRESS_SCHEMES) return null
+        return SafePhoneAddress.normalize(uri.schemeSpecificPart)
+    }
 
     private fun actionSnapshot(index: Int, action: Notification.Action): ActionSnapshot =
         ActionSnapshot(
@@ -128,4 +140,8 @@ class SamsungMessagesAdapter(
                 }
                 .orEmpty(),
         )
+
+    companion object {
+        private val SAFE_ADDRESS_SCHEMES = setOf("tel", "sms", "smsto")
+    }
 }

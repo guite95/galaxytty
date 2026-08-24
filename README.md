@@ -128,6 +128,17 @@ labels it `전송 요청됨 · 미검증`. If independent outgoing Provider evid
 later appears, it replaces the local echo. The echo is never persisted as proof
 of delivery.
 
+If the selected conversation no longer has an active RemoteInput action, the
+Helper reuses its existing one-to-one conversation data to prepare a Samsung
+Messages `ACTION_SENDTO` composer. Android does not allow the background bridge
+to open that activity directly, so the Helper posts a generic local notification.
+Tapping it opens Samsung Messages with the reply prefilled; the user reviews it
+and taps Samsung's send button. The protocol reports `user_action_required`, the
+Mac does not draw an outgoing bubble, and neither the phone number nor message
+body appears in the Helper notification or logs. Notification-derived RCS
+conversations can use the same fallback only when Samsung exposes a safe phone
+URI; no recipient is guessed from a display name.
+
 The real Helper reply test can deliver a message and must never be run without
 explicit permission for the recipient and text:
 

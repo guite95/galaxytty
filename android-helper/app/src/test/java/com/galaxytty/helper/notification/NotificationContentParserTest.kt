@@ -20,7 +20,13 @@ class NotificationContentParserTest {
                 candidates = listOf(
                     NotificationTextCandidate("내가 보낸 내용", null, 200, fromCurrentUser = true),
                     NotificationTextCandidate("이전 수신", "보낸 사람", 100, fromCurrentUser = false),
-                    NotificationTextCandidate("최신 수신 😀", "보낸 사람", 300, fromCurrentUser = false),
+                    NotificationTextCandidate(
+                        "최신 수신 😀",
+                        "보낸 사람",
+                        300,
+                        fromCurrentUser = false,
+                        replyAddress = "+821012345678",
+                    ),
                 ),
                 fallbackText = "fallback",
             ),
@@ -31,6 +37,7 @@ class NotificationContentParserTest {
         assertEquals("대화방", result.conversationTitle)
         assertEquals(300, result.postedAtMillis)
         assertEquals(NotificationContentSource.MESSAGING_STYLE, result.source)
+        assertEquals("+821012345678", result.replyAddress)
     }
 
     @Test

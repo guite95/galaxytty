@@ -160,6 +160,7 @@ class MainActivity : Activity() {
             }
             appendLine("Samsung notifications observed: ${observations.size}")
             appendLine("Paired Mac replies: ${if (remoteRepliesAllowed) "allowed" else "blocked"}")
+            appendLine("No-active-notification fallback: Samsung compose notification for resolvable 1:1 conversations")
             appendLine("Debug one-shot reply: ${if (BridgeRuntime.replyTestArmed()) "armed" else "not armed"}")
             appendLine("Local TCP port: ${BridgeRuntime.port() ?: "stopped"}")
             appendLine("TCP commands enabled: authenticated read sync, events, and locally gated replies")

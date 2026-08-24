@@ -170,3 +170,12 @@ persistent, locally controlled reply permission. It defaults to blocked after
 installation, is read at every dispatch so revocation takes effect immediately,
 and does not weaken session authentication or encryption. The debug one-shot
 gate remains separate for deliberately gated integration tests.
+
+Helper `0.12.0-poc` adds a no-active-RemoteInput fallback without duplicating
+the conversation store. It resolves an existing one-to-one SMS Provider
+conversation, or a safe `tel`/`sms`/`smsto` URI observed in a Samsung
+notification, entirely inside the Helper. A generic Helper notification then
+offers a `PendingIntent` that opens Samsung Messages with the body prefilled.
+Android still requires the user to tap that notification and Samsung's send
+button. The result is `user_action_required`, not accepted or verified, and no
+address or body is serialized or logged.

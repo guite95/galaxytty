@@ -18,6 +18,8 @@ data class CapturedMessage(
     val body: String,
     val postedAtMillis: Long,
     val source: NotificationContentSource,
+    // Kept inside the Helper only. It is never serialized to the Mac or logs.
+    val replyAddress: String? = null,
 )
 
 enum class NotificationContentSource(val safeName: String) {

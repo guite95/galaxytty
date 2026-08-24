@@ -47,7 +47,7 @@ class ContentResolverSmsDataSource(
 class SmsRepository(
     private val source: SmsDataSource,
     private val hasPermission: () -> Boolean,
-) : HistoryMessageRepository {
+) : HistoryMessageRepository, ConversationAddressResolver {
     constructor(context: Context) : this(
         source = ContentResolverSmsDataSource(context.contentResolver),
         hasPermission = {
@@ -56,6 +56,18 @@ class SmsRepository(
     )
 
     override fun available(): Boolean = hasPermission()
+
+    override fun oneToOneAddress(threadId: Long): String? {
+        if (threadId <= 0 || !available()) return null
+        return conversations()
+            .firstOrNull { conversation -> conversation.threadId == threadId }
+            ?.participants
+            ?.takeIf { participants -> participants.size == 1 }
+            ?.single()
+            ?.phone
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+    }
 
     override fun conversations(): List<LiveConversation> {
         if (!available()) return emptyList()

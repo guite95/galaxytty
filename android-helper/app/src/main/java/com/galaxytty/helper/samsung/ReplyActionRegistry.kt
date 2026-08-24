@@ -17,12 +17,14 @@ enum class ReplyDispatchStatus {
     INVALID_REQUEST,
     ACTION_UNAVAILABLE,
     ACCEPTED_UNVERIFIED,
+    USER_ACTION_REQUIRED,
     FAILED,
 }
 
 data class ReplyDispatchResult(
     val status: ReplyDispatchStatus,
     val error: String? = null,
+    val evidence: String? = null,
 )
 
 class ReplyActionRegistry(
@@ -75,7 +77,10 @@ class ReplyActionRegistry(
             )
         return try {
             registered.action.send(text)
-            ReplyDispatchResult(ReplyDispatchStatus.ACCEPTED_UNVERIFIED)
+            ReplyDispatchResult(
+                status = ReplyDispatchStatus.ACCEPTED_UNVERIFIED,
+                evidence = "remote_input_pending_intent_accepted",
+            )
         } catch (error: Exception) {
             ReplyDispatchResult(
                 ReplyDispatchStatus.FAILED,
