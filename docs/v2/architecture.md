@@ -76,6 +76,13 @@ The Mac test also requires explicit environment gates and an authenticated
 capability preflight. PendingIntent acceptance is `accepted_unverified` until
 independent outgoing evidence exists.
 
+The Go application service owns a memory-only accepted outbox. It overlays an
+outgoing bubble after `accepted_unverified` so UI refreshes do not hide an RCS
+reply merely because the SMS Provider has no row. The bubble is explicitly
+marked unverified and is removed only when a matching outgoing source record is
+observed. It is not stored across process restarts and does not upgrade the send
+result.
+
 No default test command may send a real message. Any RemoteInput, `ACTION_SENDTO`,
 or Accessibility send test requires all of the following explicit gates:
 

@@ -32,8 +32,15 @@ func Message(theme Theme, message domain.Message, width int) string {
 		lines[index] = line
 	}
 
+	metadataParts := make([]string, 0, 2)
 	if !message.Timestamp.IsZero() {
-		metadata := theme.Muted.Render(message.Timestamp.Format("15:04"))
+		metadataParts = append(metadataParts, message.Timestamp.Format("15:04"))
+	}
+	if message.SendOutcome == domain.SendOutcomeAcceptedUnverified {
+		metadataParts = append(metadataParts, "전송 요청됨 · 미검증")
+	}
+	if len(metadataParts) > 0 {
+		metadata := theme.Muted.Render(strings.Join(metadataParts, "  "))
 		if message.Direction == domain.DirectionOutgoing {
 			metadata = AlignRight(metadata, width)
 		}

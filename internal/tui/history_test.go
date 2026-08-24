@@ -211,6 +211,26 @@ func TestIncomingEventFollowsLatestOrPreservesScrolledAnchor(t *testing.T) {
 	}
 }
 
+func TestIncomingEventSortsAfterLocalAcceptedOutgoingByTimestamp(t *testing.T) {
+	base := time.Date(2026, time.August, 24, 17, 0, 0, 0, time.Local)
+	existing := []domain.Message{{
+		ID:       firstSyntheticMessageIDForTest,
+		ThreadID: 1, Body: "local outgoing", Timestamp: base,
+		Direction: domain.DirectionOutgoing, SendOutcome: domain.SendOutcomeAcceptedUnverified,
+	}}
+	incoming := []domain.Message{{
+		ID: 21, ThreadID: 1, Body: "later incoming", Timestamp: base.Add(time.Second),
+		Direction: domain.DirectionIncoming,
+	}}
+
+	merged, appended := mergeMessages(existing, incoming)
+	if appended != 1 || len(merged) != 2 || merged[0].Body != "local outgoing" || merged[1].Body != "later incoming" {
+		t.Fatalf("appended=%d merged=%+v", appended, merged)
+	}
+}
+
+const firstSyntheticMessageIDForTest int64 = 1 << 62
+
 func TestStaleHistoryResultDoesNotReplaceSelectedChat(t *testing.T) {
 	model := historyModel(t, 3)
 	model.cursor = 1

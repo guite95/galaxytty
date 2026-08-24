@@ -414,10 +414,14 @@ func (m *Model) clampChatOffset() {
 
 func mergeMessages(existing, incoming []domain.Message) ([]domain.Message, int) {
 	byID := make(map[int64]domain.Message, len(existing)+len(incoming))
-	var latestID int64
+	var latest domain.Message
+	hasLatest := false
 	for _, message := range existing {
 		byID[message.ID] = message
-		latestID = max(latestID, message.ID)
+		if !hasLatest || messageBefore(latest, message) {
+			latest = message
+			hasLatest = true
+		}
 	}
 	appended := 0
 	for _, message := range incoming {
@@ -425,7 +429,7 @@ func mergeMessages(existing, incoming []domain.Message) ([]domain.Message, int) 
 			continue
 		}
 		byID[message.ID] = message
-		if message.ID > latestID {
+		if !hasLatest || messageBefore(latest, message) {
 			appended++
 		}
 	}
@@ -433,6 +437,18 @@ func mergeMessages(existing, incoming []domain.Message) ([]domain.Message, int) 
 	for _, message := range byID {
 		merged = append(merged, message)
 	}
-	sort.Slice(merged, func(left, right int) bool { return merged[left].ID < merged[right].ID })
+	sort.Slice(merged, func(left, right int) bool { return messageBefore(merged[left], merged[right]) })
 	return merged, appended
+}
+
+func messageBefore(left, right domain.Message) bool {
+	leftMissingTime := left.Timestamp.IsZero()
+	rightMissingTime := right.Timestamp.IsZero()
+	if leftMissingTime != rightMissingTime {
+		return !leftMissingTime
+	}
+	if !leftMissingTime && !left.Timestamp.Equal(right.Timestamp) {
+		return left.Timestamp.Before(right.Timestamp)
+	}
+	return left.ID < right.ID
 }

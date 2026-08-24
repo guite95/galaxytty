@@ -44,3 +44,18 @@ func TestIncomingMessageStaysLeftAligned(t *testing.T) {
 		t.Fatalf("missing muted timestamp: %q", rendered)
 	}
 }
+
+func TestAcceptedUnverifiedOutgoingMessageShowsHonestState(t *testing.T) {
+	rendered := ansi.Strip(Message(DefaultTheme(), domain.Message{
+		Body:        "보낸 RCS 답장",
+		Timestamp:   time.Date(2026, time.August, 24, 17, 0, 0, 0, time.Local),
+		Direction:   domain.DirectionOutgoing,
+		SendOutcome: domain.SendOutcomeAcceptedUnverified,
+	}, 48))
+	if !strings.Contains(rendered, "17:00  전송 요청됨 · 미검증") {
+		t.Fatalf("missing unverified metadata: %q", rendered)
+	}
+	if strings.Contains(rendered, "전송 완료") || strings.Contains(rendered, "✓") {
+		t.Fatalf("message falsely claimed delivery: %q", rendered)
+	}
+}

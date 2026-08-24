@@ -123,7 +123,10 @@ The gated debug test independently proves that exactly one active reply action m
 the user-authorized current notification, then creates a private one-shot token
 that expires after 60 seconds. RemoteInput acceptance produces
 `accepted_unverified`, never a verified-send result. The TUI clears the composer
-to prevent an accidental duplicate but displays that delivery is unverified.
+to prevent an accidental duplicate, keeps a session-only outgoing echo, and
+labels it `전송 요청됨 · 미검증`. If independent outgoing Provider evidence
+later appears, it replaces the local echo. The echo is never persisted as proof
+of delivery.
 
 The real Helper reply test can deliver a message and must never be run without
 explicit permission for the recipient and text:

@@ -41,11 +41,16 @@ type Service struct {
 	status         domain.ApplicationStatus
 	statusProvider domain.StatusProvider
 	events         domain.MessageEventSource
+	accepted       *acceptedOutbox
 	mu             sync.Mutex
 }
 
 func NewService(store domain.MessageStore, sender domain.MessageSender, notifier domain.Notifier, lifecycle *Lifecycle, policy NotificationPolicy, status domain.ApplicationStatus) *Service {
-	return &Service{store: store, sender: sender, notifier: notifier, lifecycle: lifecycle, poller: &Poller{Store: store}, policy: policy, status: status}
+	return &Service{
+		store: store, sender: sender, notifier: notifier, lifecycle: lifecycle,
+		poller: &Poller{Store: store}, policy: policy, status: status,
+		accepted: newAcceptedOutbox(),
+	}
 }
 func (s *Service) WithStatusProvider(provider domain.StatusProvider) *Service {
 	s.statusProvider = provider
@@ -72,13 +77,21 @@ func (s *Service) Unread(ctx context.Context) ([]domain.Conversation, error) {
 	return out, nil
 }
 func (s *Service) Messages(ctx context.Context, id int64, q domain.MessageQuery) ([]domain.Message, error) {
-	return s.store.Messages(ctx, id, q)
+	messages, err := s.store.Messages(ctx, id, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.accepted.overlay(id, messages, q), nil
 }
 func (s *Service) SendToAddress(ctx context.Context, phone, text string) (domain.SendResult, error) {
 	if strings.TrimSpace(text) == "" {
 		return domain.SendResult{}, errors.New("message text is required")
 	}
-	return s.sender.Send(ctx, phone, text)
+	result, err := s.sender.Send(ctx, phone, text)
+	if err == nil && result.Outcome == domain.SendOutcomeAcceptedUnverified {
+		s.accepted.add(result.ThreadID, text)
+	}
+	return result, err
 }
 func (s *Service) SendToConversation(ctx context.Context, id int64, text string) (domain.SendResult, error) {
 	if strings.TrimSpace(text) == "" {
@@ -93,7 +106,14 @@ func (s *Service) SendToConversation(ctx context.Context, id int64, text string)
 			continue
 		}
 		if sender, ok := s.sender.(domain.ConversationMessageSender); ok {
-			return sender.SendToConversation(ctx, id, text)
+			result, err := sender.SendToConversation(ctx, id, text)
+			if err == nil && result.Outcome == domain.SendOutcomeAcceptedUnverified {
+				if result.ThreadID == 0 {
+					result.ThreadID = id
+				}
+				s.accepted.add(result.ThreadID, text)
+			}
+			return result, err
 		}
 		if len(c.Participants) != 1 {
 			return domain.SendResult{}, ErrGroupSendUnsupported

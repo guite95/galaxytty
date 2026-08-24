@@ -126,6 +126,58 @@ func TestAcceptedUnverifiedReplyClearsComposerAndShowsNotice(t *testing.T) {
 	}
 }
 
+type acceptedConversationSenderForTUI struct{}
+
+func (acceptedConversationSenderForTUI) Send(context.Context, string, string) (domain.SendResult, error) {
+	return domain.SendResult{}, errors.New("address send must not be used")
+}
+
+func (acceptedConversationSenderForTUI) SendToConversation(_ context.Context, threadID int64, _ string) (domain.SendResult, error) {
+	return domain.SendResult{ThreadID: threadID, Outcome: domain.SendOutcomeAcceptedUnverified}, nil
+}
+
+func TestAcceptedUnverifiedReplyReloadsAsOutgoingBubble(t *testing.T) {
+	backend := mock.New()
+	service := app.NewService(
+		backend,
+		acceptedConversationSenderForTUI{},
+		nil,
+		nil,
+		app.NotificationPolicy{},
+		domain.ApplicationStatus{Label: "Mock Connected"},
+	)
+	model := NewModel(context.Background(), service, time.Hour)
+	updated, _ := model.Update(conversationsMsg{items: backend.ConversationsData})
+	model = open(t, updated.(Model))
+	model = typeText(model, "synthetic RCS reply")
+
+	updated, send := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, refresh := updated.(Model).Update(send())
+	refreshMessage := refresh()
+	batch, ok := refreshMessage.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("refresh=%T", refreshMessage)
+	}
+	for _, command := range batch {
+		message := command()
+		if _, isMessages := message.(messagesMsg); isMessages {
+			updated, _ = updated.(Model).Update(message)
+		}
+	}
+	got := updated.(Model)
+	if len(got.messages) == 0 {
+		t.Fatal("accepted outgoing bubble was not loaded")
+	}
+	local := got.messages[len(got.messages)-1]
+	if local.Body != "synthetic RCS reply" || local.Direction != domain.DirectionOutgoing ||
+		local.SendOutcome != domain.SendOutcomeAcceptedUnverified {
+		t.Fatalf("local=%+v", local)
+	}
+	if !strings.Contains(got.View(), "전송 요청됨 · 미검증") {
+		t.Fatalf("view=%q", got.View())
+	}
+}
+
 func TestDuplicateEnterAndComposerChangesAreSuppressedWhileSending(t *testing.T) {
 	m, _ := fixture(t)
 	m = open(t, m)

@@ -251,3 +251,13 @@ consumed and does not authorize any additional real SMS/RCS/MMS send.
   Access, `READ_SMS`, and the background bridge remained ready; automatic NSD
   discovery and an authenticated encrypted doctor session succeeded. The new
   persistent reply permission was confirmed blocked, and no message action ran.
+- The user enabled the persistent local reply permission and completed the first
+  normal TUI reply flow. Samsung Messages showed the outgoing message as RCS,
+  and the incoming reply reached the TUI in real time. The outgoing RCS itself
+  disappeared after refresh because neither the SMS Provider nor the incoming
+  notification parser supplied an outgoing record.
+- The application service now keeps `accepted_unverified` outgoing messages in
+  a bounded process-memory outbox and overlays them on current history. The TUI
+  renders `전송 요청됨 · 미검증`; matching time-bounded outgoing evidence
+  reconciles one local echo at a time. No database or delivery inference was
+  added.

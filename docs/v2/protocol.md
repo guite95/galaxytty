@@ -166,7 +166,10 @@ before invoking any PendingIntent. A locally authorized or explicitly armed
 debug action maps to `accepted_unverified` with
 `remote_input_pending_intent_accepted` evidence. The Mac treats this as a
 completed action, clears the composer to prevent an accidental duplicate, and
-visibly reports that delivery remains unverified.
+visibly reports that delivery remains unverified. The application service keeps
+a session-only outgoing echo so an RCS reply does not disappear when the Helper
+history has no outgoing record. It is reconciled only against a matching,
+time-bounded outgoing source record and is never treated as delivery evidence.
 
 The secure channel provides confidentiality, integrity, replay protection, and
 mutual credential confirmation for protocol frames. Notification cache state

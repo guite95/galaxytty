@@ -31,10 +31,13 @@ type Message struct {
 	Timestamp     time.Time
 	// ObservedAt is the source adapter's event observation time. It is kept
 	// separate from the message timestamp for latency diagnostics.
-	ObservedAt  time.Time
-	Direction   MessageDirection
-	Read        bool
-	Type        MessageType
+	ObservedAt time.Time
+	Direction  MessageDirection
+	Read       bool
+	Type       MessageType
+	// SendOutcome is set only for a local outgoing echo when Samsung Messages
+	// accepted an action but no independent outgoing evidence is available.
+	SendOutcome SendOutcome
 	Attachments []Attachment
 }
 type Conversation struct {

@@ -14,6 +14,20 @@ type conversationSender struct {
 	text     string
 }
 
+type acceptedConversationSender struct{}
+
+func (acceptedConversationSender) Send(context.Context, string, string) (domain.SendResult, error) {
+	return domain.SendResult{}, errors.New("address send must not be used")
+}
+
+func (acceptedConversationSender) SendToConversation(_ context.Context, threadID int64, _ string) (domain.SendResult, error) {
+	return domain.SendResult{
+		ThreadID: threadID,
+		Outcome:  domain.SendOutcomeAcceptedUnverified,
+		Evidence: "remote_input_pending_intent_accepted",
+	}, nil
+}
+
 func (*conversationSender) Send(context.Context, string, string) (domain.SendResult, error) {
 	return domain.SendResult{}, errors.New("address send must not be used")
 }
@@ -82,6 +96,38 @@ func TestConversationAwareSenderDoesNotRequireMacPhoneParticipant(t *testing.T) 
 	if _, err := service.SendToConversation(context.Background(), 1, "   "); err == nil ||
 		!strings.Contains(err.Error(), "text is required") {
 		t.Fatalf("empty text err=%v", err)
+	}
+}
+
+func TestAcceptedUnverifiedConversationReplyAppearsInSessionMessages(t *testing.T) {
+	_, backend, notifier := serviceFixture(NotificationPolicy{})
+	service := NewService(
+		backend,
+		acceptedConversationSender{},
+		notifier,
+		nil,
+		NotificationPolicy{},
+		domain.ApplicationStatus{},
+	)
+
+	result, err := service.SendToConversation(context.Background(), 1, "synthetic reply")
+	if err != nil || result.Outcome != domain.SendOutcomeAcceptedUnverified {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	messages, err := service.Messages(context.Background(), 1, domain.MessageQuery{})
+	if err != nil || len(messages) != 3 {
+		t.Fatalf("messages=%+v err=%v", messages, err)
+	}
+	local := messages[len(messages)-1]
+	if local.Body != "synthetic reply" || local.Direction != domain.DirectionOutgoing ||
+		local.SendOutcome != domain.SendOutcomeAcceptedUnverified {
+		t.Fatalf("local=%+v", local)
+	}
+
+	// The echo belongs to the application session, not the Android source store.
+	source, err := backend.Messages(context.Background(), 1, domain.MessageQuery{})
+	if err != nil || len(source) != 2 {
+		t.Fatalf("source=%+v err=%v", source, err)
 	}
 }
 func TestPollingAndNotificationPolicy(t *testing.T) {
