@@ -84,9 +84,19 @@ type MessageQuery struct {
 	Limit    int
 	BeforeID int64
 }
+
+type SendOutcome string
+
+const (
+	SendOutcomeVerified           SendOutcome = "verified"
+	SendOutcomeAcceptedUnverified SendOutcome = "accepted_unverified"
+)
+
 type SendResult struct {
-	MessageID int64 `json:"message_id"`
-	ThreadID  int64 `json:"thread_id"`
+	MessageID int64       `json:"message_id"`
+	ThreadID  int64       `json:"thread_id"`
+	Outcome   SendOutcome `json:"outcome,omitempty"`
+	Evidence  string      `json:"evidence,omitempty"`
 }
 
 type Device interface {

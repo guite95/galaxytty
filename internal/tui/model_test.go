@@ -96,6 +96,36 @@ func TestComposerSend(t *testing.T) {
 	}
 }
 
+type acceptedUnverifiedSendAPI struct{ app.API }
+
+func (api acceptedUnverifiedSendAPI) SendToConversation(_ context.Context, threadID int64, _ string) (domain.SendResult, error) {
+	return domain.SendResult{
+		ThreadID: threadID,
+		Outcome:  domain.SendOutcomeAcceptedUnverified,
+		Evidence: "remote_input_pending_intent_accepted",
+	}, nil
+}
+
+func TestAcceptedUnverifiedReplyClearsComposerAndShowsNotice(t *testing.T) {
+	model, _ := fixture(t)
+	model = open(t, model)
+	model.service = acceptedUnverifiedSendAPI{API: model.service}
+	model = typeText(model, "synthetic reply")
+
+	updated, send := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, refresh := updated.(Model).Update(send())
+	got := updated.(Model)
+	if refresh == nil || got.sending || got.composer.Value() != "" || got.errorText != "" {
+		t.Fatalf("refresh=%v sending=%t composer=%q error=%q", refresh, got.sending, got.composer.Value(), got.errorText)
+	}
+	if got.noticeText != "Samsung Messages accepted the reply · delivery unverified" {
+		t.Fatalf("notice=%q", got.noticeText)
+	}
+	if !strings.Contains(got.View(), got.noticeText) {
+		t.Fatalf("view did not render notice: %q", got.View())
+	}
+}
+
 func TestDuplicateEnterAndComposerChangesAreSuppressedWhileSending(t *testing.T) {
 	m, _ := fixture(t)
 	m = open(t, m)

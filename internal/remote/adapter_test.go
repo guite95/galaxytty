@@ -78,21 +78,28 @@ func TestRemoteStoreMapsSMSProviderHistoryDTO(t *testing.T) {
 	}
 }
 
-func TestRemoteSenderRequiresVerifiedEvidence(t *testing.T) {
+func TestRemoteSenderDistinguishesAcceptedAndVerifiedOutcomes(t *testing.T) {
 	requester := &fakeRequester{responses: []protocol.Envelope{
-		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "accepted_unverified", "evidence": "remote_input_accepted"}),
-		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "accepted_unverified", "evidence": "remote_input_accepted"}),
+		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "accepted_unverified", "evidence": "remote_input_accepted", "threadId": 7}),
+		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "accepted_unverified", "evidence": "remote_input_accepted", "threadId": 7}),
 		envelope(t, protocol.TypeSendResult, map[string]any{"outcome": "verified", "evidence": "outgoing_provider", "messageId": 41, "threadId": 7}),
 	}}
 	sender := NewSender(requester)
-	if _, err := sender.Send(context.Background(), "01012345678", "synthetic"); !errors.Is(err, ErrSendEvidenceUnavailable) {
-		t.Fatalf("unverified err=%v", err)
+	accepted, err := sender.Send(context.Background(), "01012345678", "synthetic")
+	if err != nil || accepted.Outcome != domain.SendOutcomeAcceptedUnverified || accepted.ThreadID != 7 || accepted.Evidence != "remote_input_accepted" {
+		t.Fatalf("accepted=%+v err=%v", accepted, err)
 	}
-	if _, err := sender.SendToConversation(context.Background(), 7, "thread reply"); !errors.Is(err, ErrSendEvidenceUnavailable) {
-		t.Fatalf("unverified reply err=%v", err)
+	accepted, err = sender.SendToConversation(context.Background(), 7, "thread reply")
+	if err != nil || accepted.Outcome != domain.SendOutcomeAcceptedUnverified {
+		t.Fatalf("accepted reply=%+v err=%v", accepted, err)
 	}
 	result, err := sender.Send(context.Background(), "01012345678", "synthetic")
-	if err != nil || result != (domain.SendResult{MessageID: 41, ThreadID: 7}) {
+	if err != nil || result != (domain.SendResult{
+		MessageID: 41,
+		ThreadID:  7,
+		Outcome:   domain.SendOutcomeVerified,
+		Evidence:  "outgoing_provider",
+	}) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	if requester.types[0] != protocol.TypeSendMessage || requester.types[1] != protocol.TypeSendReply {

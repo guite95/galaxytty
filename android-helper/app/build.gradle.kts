@@ -10,8 +10,8 @@ android {
         applicationId = "com.galaxytty.helper"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.10.1-poc"
+        versionCode = 13
+        versionName = "0.11.0-poc"
     }
 
     buildTypes {

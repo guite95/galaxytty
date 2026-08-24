@@ -154,7 +154,7 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 			fmt.Fprintln(out)
 			fmt.Fprintf(out, "✓ discovery / local TCP  %s\n", status.Label)
 			fmt.Fprintf(out, "✓ device                 %s\n", status.Device)
-			fmt.Fprintln(out, "○ messaging commands     read-only PoC")
+			fmt.Fprintln(out, "○ reply execution        requires local Galaxy approval")
 			return nil
 		}
 		report := deps.doctor(ctx, cfg, opts.device)
@@ -258,9 +258,19 @@ func execute(ctx context.Context, in io.Reader, out io.Writer, args []string, de
 		if err != nil {
 			return err
 		}
-		response := sendResponse{Success: true, MessageID: result.MessageID, ThreadID: result.ThreadID}
+		response := sendResponse{
+			Success:   result.Outcome != domain.SendOutcomeAcceptedUnverified,
+			MessageID: result.MessageID,
+			ThreadID:  result.ThreadID,
+			Outcome:   result.Outcome,
+			Evidence:  result.Evidence,
+		}
 		if opts.json {
 			return json.NewEncoder(out).Encode(response)
+		}
+		if result.Outcome == domain.SendOutcomeAcceptedUnverified {
+			fmt.Fprintln(out, "Samsung Messages accepted the send action; delivery is unverified.")
+			return nil
 		}
 		fmt.Fprintln(out, "Message sent.")
 		return nil
@@ -311,8 +321,6 @@ func actionableRealError(err error) error {
 		return fmt.Errorf("%w. Open Helper, reveal the pairing code, then run msg pair", err)
 	case errors.Is(err, remote.ErrAuthentication):
 		return fmt.Errorf("%w. Run msg pair again with the current Helper code", err)
-	case errors.Is(err, remote.ErrSendEvidenceUnavailable):
-		return fmt.Errorf("%w. Check Samsung Messages on the Galaxy before deciding whether to retry", err)
 	default:
 		return err
 	}
@@ -346,9 +354,11 @@ func measureHelperLatency(ctx context.Context, address string) (remote.LatencyRe
 }
 
 type sendResponse struct {
-	Success   bool  `json:"success"`
-	MessageID int64 `json:"message_id"`
-	ThreadID  int64 `json:"thread_id"`
+	Success   bool               `json:"success"`
+	MessageID int64              `json:"message_id"`
+	ThreadID  int64              `json:"thread_id"`
+	Outcome   domain.SendOutcome `json:"outcome,omitempty"`
+	Evidence  string             `json:"evidence,omitempty"`
 }
 
 type pairResponse struct {

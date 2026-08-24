@@ -15,8 +15,9 @@
 ## Real-device safety
 
 Read-only device inspection, APK update installation, notification metadata,
-and redacted logcat checks are permitted during development. No real SMS/RCS/MMS
-send has been authorized for this work.
+and redacted logcat checks are permitted during development. One exact
+RemoteInput reply was separately authorized and sent; that authorization was
+consumed and does not authorize any additional real SMS/RCS/MMS send.
 
 ## Implemented after baseline
 
@@ -26,8 +27,9 @@ send has been authorized for this work.
 - Lazy history paging, stable scroll anchors, stale-result protection, and
   cancellation of active UI work during shutdown.
 - Native Kotlin Helper project with a redacted Samsung Messages notification
-  observer and RemoteInput shape analysis. Release reply execution remains
-  disabled; debuggable builds require an expiring private one-shot test gate.
+  observer and RemoteInput shape analysis. Normal reply execution remains
+  locally blocked until the Galaxy user explicitly enables it; debuggable
+  builds also retain an expiring private one-shot test gate.
 - Versioned length-prefixed JSON codecs, heartbeat, request correlation,
   sequence-gap reporting, reconnect, DNS-SD discovery, and remote Go adapters.
 - The Mac reports a connection only after a valid Helper `HELLO`, and shutdown
@@ -233,10 +235,19 @@ send has been authorized for this work.
   does not claim SMS, RCS, or delivery success. A redacted notification update
   followed the action, but notification behavior is not outgoing evidence.
 - The user subsequently confirmed that the authorized reply appeared as
-  successfully sent through Samsung Messages. This is the first human-confirmed
-  real-device RemoteInput send for the Helper path. It does not change the
-  protocol result to `verified`, because the Helper still lacks independent
-  machine-readable outgoing evidence and cannot classify the transport.
+  successfully sent through Samsung Messages as chat+/RCS. This is the first
+  human-confirmed RCS RemoteInput send for the Helper path. It does not change
+  the protocol result to `verified`, because the Helper still lacks independent
+  machine-readable outgoing evidence and cannot classify future transports.
 - A post-action read-only preflight found zero active RemoteInput targets. The
   script therefore refuses to arm another execution in the current state,
   preventing an accidental repeat of the authorized text.
+- Helper `0.11.0-poc` adds a persistent local **Allow replies from paired Mac**
+  control, blocked by default and guarded by an on-device warning. Revocation is
+  checked on every dispatch. The Go adapter now models PendingIntent acceptance
+  as `accepted_unverified` rather than an error; the TUI clears the composer to
+  prevent duplicates while explicitly showing that delivery is unverified.
+- The debug APK was update-installed without clearing app data. Notification
+  Access, `READ_SMS`, and the background bridge remained ready; automatic NSD
+  discovery and an authenticated encrypted doctor session succeeded. The new
+  persistent reply permission was confirmed blocked, and no message action ran.

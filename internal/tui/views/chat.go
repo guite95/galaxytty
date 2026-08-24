@@ -16,6 +16,7 @@ type ChatProps struct {
 	Messages      []domain.Message
 	Offset        int
 	Composer      string
+	Notice        string
 	Error         string
 	LoadingOlder  bool
 }
@@ -38,6 +39,9 @@ func Chat(props ChatProps) string {
 func chatFooter(props ChatProps) []string {
 	composer := strings.ReplaceAll(props.Composer, "\x00", "")
 	bottom := []string{components.Clip(composer, props.Width)}
+	if line := components.NoticeLine(props.Theme, props.Notice, props.Width); line != "" {
+		bottom = append(bottom, line)
+	}
 	if line := components.ErrorLine(props.Theme, props.Error, props.Width); line != "" {
 		bottom = append(bottom, line)
 	}

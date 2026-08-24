@@ -91,8 +91,10 @@ authenticated PoC is intentionally **non-sending by default**. It extracts the l
 incoming `MessagingStyle` text from Samsung Messages notifications, keeps a
 bounded in-memory-only conversation cache, and exposes read sync plus live
 `MESSAGE_RECEIVED` events. A correlated `SEND_REPLY` request reaches a
-default-disabled execution policy. Only a debuggable APK with a fresh private
-one-shot marker can invoke the retained notification action. With user-granted
+default-blocked execution policy. Normal replies are possible only after the
+user confirms **Allow replies from paired Mac** on the Galaxy; the permission
+can be blocked immediately from the same Helper screen. A debuggable APK also
+retains a private 60-second one-shot gate for explicit integration tests. With user-granted
 `READ_SMS`, bounded SMS conversations/history are
 queried by the Helper's `ContentResolver`; the Mac no longer reads that
 Provider for the v2 path. Message content is available only after mutual HMAC key
@@ -115,11 +117,13 @@ rediscovery loop.
 The application layer can now route an existing notification conversation by
 opaque `threadId` through `SEND_REPLY`; the Mac does not need a phone number and
 still does not know Samsung-specific details. The Helper retains the matching
-free-form RemoteInput action only in memory. Release builds remain disabled.
-The gated debug test first proves that exactly one active reply action matches
+free-form RemoteInput action only in memory. Release and debug builds both
+default to blocked and require a persistent local opt-in for normal replies.
+The gated debug test independently proves that exactly one active reply action matches
 the user-authorized current notification, then creates a private one-shot token
 that expires after 60 seconds. RemoteInput acceptance produces
-`accepted_unverified`, never a verified-send result.
+`accepted_unverified`, never a verified-send result. The TUI clears the composer
+to prevent an accidental duplicate but displays that delivery is unverified.
 
 The real Helper reply test can deliver a message and must never be run without
 explicit permission for the recipient and text:

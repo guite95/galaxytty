@@ -9,4 +9,9 @@
     <string name="allow_sms_history">Allow SMS history (read-only)</string>
     <string name="refresh_observations">Refresh observations</string>
     <string name="toggle_pairing_code">Show / hide pairing code</string>
+    <string name="allow_remote_replies">Allow replies from paired Mac</string>
+    <string name="block_remote_replies">Block replies from paired Mac</string>
+    <string name="allow_remote_replies_title">Allow real message replies?</string>
+    <string name="allow_remote_replies_warning">A paired GalaxyTTY client will be able to send real replies through Samsung Messages. Messages may reach other people or incur carrier charges. You can block replies here at any time.</string>
+    <string name="allow_remote_replies_confirm">Allow replies</string>
 </resources>

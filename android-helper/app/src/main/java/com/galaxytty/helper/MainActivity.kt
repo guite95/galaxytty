@@ -2,6 +2,7 @@ package com.galaxytty.helper
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Intent
@@ -19,6 +20,7 @@ import com.galaxytty.helper.notification.GalaxyNotificationListenerService
 import com.galaxytty.helper.notification.ObservationRepository
 import com.galaxytty.helper.service.BridgeForegroundService
 import com.galaxytty.helper.service.BridgePreferences
+import com.galaxytty.helper.service.RemoteReplyPreferences
 import com.galaxytty.helper.security.PairingCredential
 import com.galaxytty.helper.tcp.BridgeRuntime
 import java.text.DateFormat
@@ -26,6 +28,7 @@ import java.util.Date
 
 class MainActivity : Activity() {
     private lateinit var statusView: TextView
+    private lateinit var remoteReplyButton: Button
     private var showPairingCode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,6 +108,10 @@ class MainActivity : Activity() {
                 renderStatus()
             }
         })
+        remoteReplyButton = Button(this).apply {
+            setOnClickListener { toggleRemoteReplies() }
+        }
+        content.addView(remoteReplyButton)
         statusView = TextView(this).apply {
             typeface = Typeface.MONOSPACE
             textSize = 13f
@@ -128,6 +135,10 @@ class MainActivity : Activity() {
         val restart = if (BridgePreferences.enabled(this)) "enabled" else "disabled"
         val bridgeNotification = if (hasBridgeNotificationPermission()) "granted" else "required"
         val smsHistory = if (hasSmsHistoryPermission()) "granted" else "required"
+        val remoteRepliesAllowed = RemoteReplyPreferences.allowed(this)
+        remoteReplyButton.text = getString(
+            if (remoteRepliesAllowed) R.string.block_remote_replies else R.string.allow_remote_replies,
+        )
         statusView.text = buildString {
             appendLine("Notification access: $access")
             appendLine("Bridge notification permission: $bridgeNotification")
@@ -148,10 +159,10 @@ class MainActivity : Activity() {
                 appendLine("Pairing code: hidden")
             }
             appendLine("Samsung notifications observed: ${observations.size}")
-            appendLine("Real reply execution: disabled by default")
+            appendLine("Paired Mac replies: ${if (remoteRepliesAllowed) "allowed" else "blocked"}")
             appendLine("Debug one-shot reply: ${if (BridgeRuntime.replyTestArmed()) "armed" else "not armed"}")
             appendLine("Local TCP port: ${BridgeRuntime.port() ?: "stopped"}")
-            appendLine("TCP commands enabled: authenticated read sync and encrypted events")
+            appendLine("TCP commands enabled: authenticated read sync, events, and locally gated replies")
             observations.takeLast(10).forEachIndexed { index, observation ->
                 appendLine()
                 appendLine("Observation ${index + 1}")
@@ -166,6 +177,23 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun toggleRemoteReplies() {
+        if (RemoteReplyPreferences.allowed(this)) {
+            RemoteReplyPreferences.setAllowed(this, false)
+            renderStatus()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.allow_remote_replies_title)
+            .setMessage(R.string.allow_remote_replies_warning)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.allow_remote_replies_confirm) { _, _ ->
+                RemoteReplyPreferences.setAllowed(this, true)
+                renderStatus()
+            }
+            .show()
     }
 
     private fun startBackgroundBridge() {

@@ -28,6 +28,7 @@ func (m Model) View() string {
 			Messages:     m.messages,
 			Offset:       m.chatOffset,
 			Composer:     m.composer.View(),
+			Notice:       m.noticeText,
 			Error:        m.errorText,
 			LoadingOlder: m.loadingOlder,
 		})

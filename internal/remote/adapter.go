@@ -12,8 +12,7 @@ import (
 )
 
 var (
-	ErrUnexpectedResponse      = errors.New("unexpected Galaxy Helper response")
-	ErrSendEvidenceUnavailable = errors.New("Galaxy Helper accepted the send action but did not verify outgoing evidence")
+	ErrUnexpectedResponse = errors.New("unexpected Galaxy Helper response")
 )
 
 type Requester interface {
@@ -120,9 +119,18 @@ func (sender *Sender) send(ctx context.Context, messageType protocol.Type, reque
 	}
 	switch resultPayload.Outcome {
 	case "verified":
-		return domain.SendResult{MessageID: resultPayload.MessageID, ThreadID: resultPayload.ThreadID}, nil
+		return domain.SendResult{
+			MessageID: resultPayload.MessageID,
+			ThreadID:  resultPayload.ThreadID,
+			Outcome:   domain.SendOutcomeVerified,
+			Evidence:  resultPayload.Evidence,
+		}, nil
 	case "accepted_unverified":
-		return domain.SendResult{}, fmt.Errorf("%w: %s", ErrSendEvidenceUnavailable, resultPayload.Evidence)
+		return domain.SendResult{
+			ThreadID: resultPayload.ThreadID,
+			Outcome:  domain.SendOutcomeAcceptedUnverified,
+			Evidence: resultPayload.Evidence,
+		}, nil
 	default:
 		if strings.TrimSpace(resultPayload.Error) == "" {
 			resultPayload.Error = "Galaxy Helper reported send failure"

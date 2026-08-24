@@ -162,10 +162,11 @@ transport or recipient:
 ```
 
 The default policy returns a correlated `SEND_RESULT` with `outcome: "failed"`
-before invoking any PendingIntent. An explicitly armed debug action maps to
-`accepted_unverified` with `remote_input_pending_intent_accepted` evidence.
-`accepted_unverified` is intentionally surfaced as an error by the Mac adapter,
-so the composer is not cleared and success is not claimed.
+before invoking any PendingIntent. A locally authorized or explicitly armed
+debug action maps to `accepted_unverified` with
+`remote_input_pending_intent_accepted` evidence. The Mac treats this as a
+completed action, clears the composer to prevent an accidental duplicate, and
+visibly reports that delivery remains unverified.
 
 The secure channel provides confidentiality, integrity, replay protection, and
 mutual credential confirmation for protocol frames. Notification cache state
@@ -177,5 +178,5 @@ When sending is enabled later, `SEND_RESULT.outcome` must be one of:
 
 - `verified`: outgoing evidence was observed and the Mac may report success;
 - `accepted_unverified`: an action was accepted but transport evidence was not
-  available; the Mac reports an unverified result, not success;
+  available; the Mac reports acceptance and an unverified delivery state;
 - `failed`: the Helper observed a failure.

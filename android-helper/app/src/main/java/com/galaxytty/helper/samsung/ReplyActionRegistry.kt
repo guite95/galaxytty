@@ -65,7 +65,7 @@ class ReplyActionRegistry(
         if (!policy.allowsExecution()) {
             return ReplyDispatchResult(
                 ReplyDispatchStatus.DISABLED,
-                "RemoteInput execution is disabled until an explicit real-send authorization",
+                "Replies are blocked on the Galaxy; enable replies locally in GalaxyTTY Helper",
             )
         }
         val registered = actions[threadId]

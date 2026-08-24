@@ -32,6 +32,13 @@ func ErrorLine(theme Theme, value string, width int) string {
 	return theme.Error.Render(Truncate(value, width))
 }
 
+func NoticeLine(theme Theme, value string, width int) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return theme.Warning.Render(Truncate(value, width))
+}
+
 func isConnected(state string) bool {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "", "connected", "ready", "usb", "wireless", "mock connected":

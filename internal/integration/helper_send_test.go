@@ -38,9 +38,9 @@ func TestRealHelperReplySend(t *testing.T) {
 	conversation := resolveReplyTarget(t, client, target)
 	requireReplyCapability(t, client, conversation.ThreadID)
 
-	_, err := remote.NewSender(client).SendToConversation(context.Background(), conversation.ThreadID, text)
-	if !errors.Is(err, remote.ErrSendEvidenceUnavailable) {
-		t.Fatalf("RemoteInput action was not accepted as unverified: %v", err)
+	result, err := remote.NewSender(client).SendToConversation(context.Background(), conversation.ThreadID, text)
+	if err != nil || result.Outcome != domain.SendOutcomeAcceptedUnverified {
+		t.Fatalf("RemoteInput action was not accepted as unverified: result=%+v err=%v", result, err)
 	}
 	t.Log("RemoteInput action accepted; outgoing delivery remains unverified")
 }

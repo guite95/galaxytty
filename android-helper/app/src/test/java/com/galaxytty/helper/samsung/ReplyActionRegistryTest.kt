@@ -15,6 +15,7 @@ class ReplyActionRegistryTest {
         val result = registry.dispatch(7, "must not send")
 
         assertEquals(ReplyDispatchStatus.DISABLED, result.status)
+        assertTrue(result.error?.contains("enable replies locally") == true)
         assertFalse(invoked)
     }
 

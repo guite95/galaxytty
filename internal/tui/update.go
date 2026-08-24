@@ -150,6 +150,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if typed.err == nil {
 			m.composer.SetValue("")
 			m.errorText = ""
+			m.noticeText = ""
+			if typed.result.Outcome == domain.SendOutcomeAcceptedUnverified {
+				m.noticeText = "Samsung Messages accepted the reply · delivery unverified"
+			}
 			m.chatOffset = 0
 			return m, tea.Batch(m.loadConversations(), m.loadMessages(m.selectedID()))
 		}
@@ -241,6 +245,7 @@ func (m Model) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = conversationsScreen
 		m.composer.SetValue("")
 		m.errorText = ""
+		m.noticeText = ""
 		m.searchQuery = ""
 		return m, nil
 	}
@@ -321,6 +326,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.status = "Sending…"
 	m.connectionState = "sending…"
 	m.errorText = ""
+	m.noticeText = ""
 	return m, func() tea.Msg {
 		result, err := m.service.SendToConversation(m.ctx, threadID, value)
 		return sentMsg{result: result, err: err}

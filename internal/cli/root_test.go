@@ -160,7 +160,7 @@ func TestHelperDoctorDoesNotInvokeMessagingCommands(t *testing.T) {
 	if err := execute(context.Background(), strings.NewReader(""), &out, []string{"doctor", "--helper"}, deps); err != nil {
 		t.Fatal(err)
 	}
-	if !called || !strings.Contains(out.String(), "read-only PoC") {
+	if !called || !strings.Contains(out.String(), "requires local Galaxy approval") {
 		t.Fatalf("called=%t output=%q", called, out.String())
 	}
 }
@@ -277,6 +277,50 @@ func TestRealSendUsesRuntimeAndPrintsPrivacySafePlainSuccess(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "01012345678") || strings.Contains(out.String(), "private body") {
 		t.Fatalf("send output leaked private values: %q", out.String())
+	}
+}
+
+func TestRealSendPrintsAcceptedUnverifiedWithoutClaimingDelivery(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+		return runtimeWithSender(fixedSender{result: domain.SendResult{
+			ThreadID: 49,
+			Outcome:  domain.SendOutcomeAcceptedUnverified,
+			Evidence: "remote_input_pending_intent_accepted",
+		}}), nil
+	}}
+	var out bytes.Buffer
+	err := execute(context.Background(), strings.NewReader(""), &out, []string{"send", "--to", "01012345678", "--text", "private body"}, deps)
+	if err != nil || strings.TrimSpace(out.String()) != "Samsung Messages accepted the send action; delivery is unverified." {
+		t.Fatalf("out=%q err=%v", out.String(), err)
+	}
+	if strings.Contains(out.String(), "01012345678") || strings.Contains(out.String(), "private body") {
+		t.Fatalf("send output leaked private values: %q", out.String())
+	}
+}
+
+func TestRealSendJSONDoesNotClaimUnverifiedAcceptanceAsSuccess(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	deps := dependencies{real: func(context.Context, config.Config, string) (*bootstrap.Runtime, error) {
+		return runtimeWithSender(fixedSender{result: domain.SendResult{
+			ThreadID: 49,
+			Outcome:  domain.SendOutcomeAcceptedUnverified,
+			Evidence: "remote_input_pending_intent_accepted",
+		}}), nil
+	}}
+	var out bytes.Buffer
+	err := execute(context.Background(), strings.NewReader(""), &out, []string{
+		"send", "--to", "01012345678", "--text", "private body", "--json",
+	}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response sendResponse
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Success || response.Outcome != domain.SendOutcomeAcceptedUnverified || response.MessageID != 0 {
+		t.Fatalf("response=%+v", response)
 	}
 }
 

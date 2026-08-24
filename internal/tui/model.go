@@ -85,6 +85,7 @@ type Model struct {
 	connectionState string
 	deviceName      string
 	errorText       string
+	noticeText      string
 	pollInterval    time.Duration
 	sending         bool
 	chatOffset      int

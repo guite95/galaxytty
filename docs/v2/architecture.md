@@ -67,9 +67,11 @@ path.
 
 The Helper owns every Samsung-specific object. It retains a bounded mapping from
 thread ID to an active free-form RemoteInput action and removes it with the
-notification. The production registry is constructed with a hard-disabled
-execution policy for release builds. Debug builds may consume one private-file
-marker that expires after 60 seconds and is deleted before the action runs.
+notification. Reply execution defaults to blocked in every build. The Galaxy
+user may enable or revoke normal replies through a persistent local preference;
+the preference is evaluated at every dispatch. Debug builds may additionally
+consume one private-file marker that expires after 60 seconds and is deleted
+before the action runs.
 The Mac test also requires explicit environment gates and an authenticated
 capability preflight. PendingIntent acceptance is `accepted_unverified` until
 independent outgoing evidence exists.

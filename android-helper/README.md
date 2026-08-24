@@ -1,7 +1,7 @@
 # GalaxyTTY Helper
 
 Native Kotlin Android Helper for GalaxyTTY v2. The current implementation is a
-non-sending real-time notification and read-only SMS-history PoC.
+real-time notification, read-only SMS-history, and locally authorized reply PoC.
 
 It accepts only notifications from `com.samsung.android.messaging` and records
 the following redacted diagnostics:
@@ -12,8 +12,8 @@ the following redacted diagnostics:
 - hashed RemoteInput result keys.
 
 Message bodies, phone numbers, notification titles, pairing credentials, and
-reply text are not logged. Production wiring hard-disables the code that could
-invoke a notification action or send a RemoteInput reply.
+reply text are not logged. Remote reply execution is blocked by default and can
+be enabled only through an explicit confirmation on the Galaxy itself.
 
 For the messaging path, the Helper reads Android's structured
 `Notification.MessagingStyle.Message` bundles first and falls back to the
@@ -46,8 +46,9 @@ sent over TCP. Every TCP session performs mutual proof verification and derives
 directional AES-256-GCM keys from a new challenge. All subsequent commands and
 events are encrypted and replay-protected before even the heartbeat succeeds.
 Read sync and content events are enabled only inside that encrypted session.
-Send commands remain disabled until their separate authorization and outgoing
-evidence gates are complete.
+`SEND_REPLY` remains blocked until the local user enables **Allow replies from
+paired Mac**. The setting can be revoked immediately from the Helper screen.
+Other send commands remain disabled.
 
 ## Build
 
@@ -73,6 +74,12 @@ this permission. Contact names are not requested in this slice; conversation
 participants use the Provider address until a later, separately scoped contact
 permission decision.
 
+To reply from the Mac TUI, tap **Allow replies from paired Mac** and confirm the
+warning on the Galaxy. This permits a mutually authenticated paired client to
+execute the active Samsung Messages RemoteInput reply action. PendingIntent
+acceptance is shown as delivery-unverified; it is not promoted to delivered or
+transport-verified without independent evidence.
+
 After access is granted, receive a Samsung Messages notification and inspect
 the Helper screen or the redacted tags:
 
@@ -81,8 +88,8 @@ adb logcat -s GalaxyTTY GalaxyTTY-Notification
 ```
 
 This can establish whether a chat notification exposes a RemoteInput action. It
-does not establish that Samsung Messages will accept a reply, which requires a
-separately authorized real-send test in a later phase.
+does not by itself establish that Samsung Messages will accept a reply; that
+requires a separately authorized real-send test.
 
 ## Reference-device evidence
 
@@ -153,6 +160,13 @@ application context as required for a non-null fill-in Intent, Samsung accepted
 the one-shot RemoteInput action. The result remains `accepted_unverified`:
 there was no exact outgoing SMS Provider row, and the Helper does not infer RCS
 delivery from notification behavior. The user then confirmed that Samsung
-Messages showed the authorized reply as successfully sent. That is valid
-real-device PoC evidence, but the runtime still cannot automatically promote a
-future accepted action to `verified` without independent outgoing evidence.
+Messages showed the authorized reply as successfully sent through chat+/RCS.
+That is valid human-confirmed real-device PoC evidence, but the runtime still
+cannot automatically classify or promote a future accepted action to `verified`
+without independent outgoing evidence.
+
+Helper `0.11.0-poc` replaces the debug-only limitation for normal use with a
+persistent, locally controlled reply permission. It defaults to blocked after
+installation, is read at every dispatch so revocation takes effect immediately,
+and does not weaken session authentication or encryption. The debug one-shot
+gate remains separate for deliberately gated integration tests.
