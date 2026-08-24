@@ -8,9 +8,19 @@
 > an authorized Galaxy and can incur normal carrier or data charges.
 
 GalaxyTTY provides a Go CLI and Bubble Tea TUI for Samsung Galaxy messages on
-macOS. Reads use Android Content Providers over ADB. Text sends use Samsung
-Messages on a separate scrcpy virtual display; GalaxyTTY does not install an
-Android application and does not call modem SMS APIs directly.
+macOS.
+
+> [!IMPORTANT]
+> The `feat/tui-redesign` branch is the GalaxyTTY v2 transition. It adds a
+> native Kotlin `android-helper`, local TCP/DNS-SD protocol, and remote Go
+> adapters while retaining the existing application/domain/TUI/CLI layers.
+> The default real mode remains the verified legacy ADB/scrcpy path until the
+> Helper notification, history, pairing, and send paths pass real-device gates.
+
+Legacy reads use Android Content Providers over ADB and text sends use Samsung
+Messages on a separate scrcpy virtual display. The v2 Helper path moves Android
+access onto the Galaxy and is selected explicitly with `--helper` during the
+transition.
 
 ## Prerequisites
 
@@ -21,9 +31,11 @@ Android application and does not call modem SMS APIs directly.
   already-connected Wireless Debugging target
 - Samsung Messages (`com.samsung.android.messaging`)
 
-GalaxyTTY never runs `adb pair`, targets the main display with a wake command,
-unlocks it, enters a PIN, changes the default SMS app, grants SMS permissions,
-or installs an APK. Pair or authorize the device yourself before starting it.
+The legacy client never runs `adb pair`, targets the main display with a wake
+command, unlocks it, enters a PIN, changes the default SMS app, or grants SMS
+permissions. The v2 deployment script only performs an APK update install; it
+does not bypass Android's Notification Access or other user approval screens.
+Pair or authorize the device yourself before starting it.
 
 ## Real mode
 
@@ -38,6 +50,63 @@ go run ./cmd/msg unread --json
 go run ./cmd/msg messages 42 --json
 ```
 
+## v2 Helper PoC
+
+Build and update-install the native Helper without uninstalling its data:
+
+```sh
+make helper-test
+make helper-deploy
+```
+
+Android SDK Platform 36 is required. The user must grant Notification Access
+from the Helper screen. Existing SMS history additionally requires the Helper's
+**Allow SMS history (read-only)** button. The deployment script never bypasses
+either Android approval UI.
+
+The Mac discovers `_galaxytty._tcp.local` automatically:
+
+```sh
+go run ./cmd/msg pair
+go run ./cmd/msg --helper
+```
+
+To measure the next real notification without printing its content:
+
+```sh
+go run ./cmd/msg --helper latency
+```
+
+The probe calibrates Galaxy/Mac clock offset with encrypted PING/PONG samples,
+then reports notification-post to Mac event-decode latency for one new
+content-bearing event. It does not measure the final terminal redraw.
+
+On first setup, reveal the high-entropy pairing code from the Helper screen and
+enter it at the hidden prompt. The code is never sent over TCP; the Mac proves
+possession with a fresh HMAC challenge and stores the resulting shared
+credential in `~/.config/galaxytty/credentials.json` with mode `0600`.
+
+`--helper-address host:port` is available only as a debug fallback. The current
+authenticated PoC is intentionally **non-sending by default**. It extracts the latest
+incoming `MessagingStyle` text from Samsung Messages notifications, keeps a
+bounded in-memory-only conversation cache, and exposes read sync plus live
+`MESSAGE_RECEIVED` events. A correlated `SEND_REPLY` request reaches a
+hard-disabled execution policy and cannot invoke the retained notification
+action. With user-granted `READ_SMS`, bounded SMS conversations/history are
+queried by the Helper's `ContentResolver`; the Mac no longer reads that
+Provider for the v2 path. Message content is available only after mutual HMAC key
+confirmation, inside AES-256-GCM `SECURE` frames using directional HKDF-derived
+keys and monotonic replay-protected counters. Notification transport remains
+`unknown` until the Helper has evidence for SMS, MMS, or RCS.
+
+The application layer can now route an existing notification conversation by
+opaque `threadId` through `SEND_REPLY`; the Mac does not need a phone number and
+still does not know Samsung-specific details. The Helper retains the matching
+free-form RemoteInput action only in memory. Production wiring uses a hard
+disabled execution policy, so `PendingIntent.send()` cannot run yet. When that
+gate is explicitly enabled in a later authorized device test, RemoteInput
+acceptance will produce `accepted_unverified`, never a verified-send result.
+
 When one physical Galaxy appears through USB and Wireless ADB, GalaxyTTY groups
 the endpoints by hardware serial and selects USB by default. Select an exact
 already-authorized target when multiple physical Galaxies are present:
@@ -46,8 +115,8 @@ already-authorized target when multiple physical Galaxies are present:
 go run ./cmd/msg --device synthetic-adb-target conversations
 ```
 
-The `--mock`, `--json`, and `--device` flags may appear before or after a
-subcommand.
+The `--mock`, `--helper`, `--json`, `--device`, and debug-only
+`--helper-address` flags may appear before or after a subcommand.
 
 ## Real text sending
 
